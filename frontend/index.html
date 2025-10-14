@@ -4,9 +4,355 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI 学习平台</title>
+    <style>
+      body { font-family: Arial, "Microsoft YaHei", sans-serif; margin:20px; }
+      #controls { margin-bottom:12px; }
+      button { padding:8px 12px; margin-right:8px; }
+      #dialog { border:1px solid #ddd; padding:12px; height:360px; overflow:auto; background:#fafafa; white-space:pre-wrap; }
+      .msg { margin:8px 0; padding:8px; border-radius:6px; }
+      .teacher { background:#e8f0ff; }
+      .user { background:#fff3e0; text-align:right; }
+      #askArea { margin-top:8px; display:none; }
+      textarea { width:100%; height:64px; }
+      #apiNotice { color:#666; margin-left:8px; font-size:0.9em; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/index.jsx"></script>
+    <h2>课程：神经网络入门</h2>
+    <div id="controls">
+      <button id="enterBtn">进入学习</button>
+      <button id="nextBtn" disabled>下一步</button>
+      <span id="status"></span>
+      <div style="display:inline-block; margin-left:12px;">
+        <input id="apiBaseInput" placeholder="http://localhost:5000" style="width:220px; padding:6px;" />
+        <button id="setApiBtn">设置 API</button>
+        <button id="testApiBtn">测试后端</button>
+        <span id="apiNotice"></span>
+      </div>
+    </div>
+
+    <div id="dialog" aria-live="polite"></div>
+
+    <div id="askArea">
+      <textarea id="question" placeholder="在此输入你的问题..."></textarea>
+      <div style="margin-top:6px;">
+        <button id="askBtn">提问 AI 教师</button>
+      </div>
+    </div>
+
+    <script>
+      (function(){
+		// 把默认保留为本地 8080，但会被 discoverBackend 覆盖
+		var API_BASE = 'http://localhost:8080';
+
+        var API_PATH = {
+          start: '/api/ai_teacher/start',
+          next: '/api/ai_teacher/next',
+          ask: '/api/ai_teacher/ask',
+          status: '/__status'
+        };
+        function apiUrl(path) { return API_BASE.replace(/\/$/, '') + path; }
+
+        var apiBaseInput = document.getElementById('apiBaseInput');
+        var setApiBtn = document.getElementById('setApiBtn');
+        var apiNotice = document.getElementById('apiNotice');
+        apiBaseInput.value = API_BASE;
+        setApiBtn.addEventListener('click', function(){
+          var v = (apiBaseInput.value || '').trim();
+          if (v) {
+            API_BASE = v;
+            apiNotice.textContent = '已设置后端: ' + API_BASE;
+          }
+        });
+
+        var fileName = 'DAY1.txt';
+        var currentIndex = -1;
+        var totalSegments = 0;
+        // client_id：持久化到 localStorage，用于会话记忆
+        var CLIENT_KEY = 'ai_teacher_client_id';
+        function genClientId() {
+          return 'c-' + Math.random().toString(36).slice(2, 10);
+        }
+        var clientId = localStorage.getItem(CLIENT_KEY);
+        if (!clientId) {
+          clientId = genClientId();
+          localStorage.setItem(CLIENT_KEY, clientId);
+        }
+ 
+         var enterBtn = document.getElementById('enterBtn');
+         var nextBtn = document.getElementById('nextBtn');
+         var dialog = document.getElementById('dialog');
+         var status = document.getElementById('status');
+         var askArea = document.getElementById('askArea');
+         var questionEl = document.getElementById('question');
+         var askBtn = document.getElementById('askBtn');
+         var testApiBtn = document.getElementById('testApiBtn'); // 新增：测试后端按钮引用
+         // 始终显示提问区域（常驻），在取得 DOM 元素后设置并做存在性检查
+         if (askArea) {
+           askArea.style.display = 'block';
+         }
+
+        function appendMessage(text, cls) {
+          var d = document.createElement('div');
+          d.className = 'msg ' + (cls || 'teacher');
+          d.textContent = text;
+          dialog.appendChild(d);
+          dialog.scrollTop = dialog.scrollHeight;
+        }
+
+        // 解析 response 安全获得文本或 JSON
+        function safeParse(res) {
+          var ct = res.headers.get('content-type') || '';
+          ct = ct.toLowerCase();
+          if (ct.indexOf('application/json') !== -1) {
+            return res.json().catch(function(){ return res.text().then(function(t){ return { __rawText: t }; }); });
+          } else {
+            return res.text().then(function(t){ return { __rawText: t }; });
+          }
+        }
+
+        function looksLikeHtml(text) {
+          if (!text) return false;
+          var head = text.trim().slice(0,200).toLowerCase();
+          return head.indexOf('<!doctype') === 0 || head.indexOf('<html') === 0 || head.indexOf('<!doctype') !== -1 || head.indexOf('<html') !== -1;
+        }
+
+        // 先简单 ping 后端
+        function pingBackend() {
+          var url = apiUrl(API_PATH.status);
+          return fetch(url, { method: 'GET' })
+            .then(function(res){ return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; }); })
+            .catch(function(e){ return { error: e }; });
+        }
+
+        function requestJson(url, opts) {
+          return fetch(url, opts).then(function(res){
+            return safeParse(res).then(function(parsed){
+              return { res: res, parsed: parsed };
+            });
+          }).catch(function(e){ return { error: e }; });
+        }
+
+        // startLesson: ping 后端再请求 start
+        function startLesson() {
+          status.textContent = '加载中...';
+          dialog.innerHTML = '';
+          currentIndex = -1;
+          pingBackend().then(function(r){
+            if (r.error) {
+              appendMessage('无法连接后端: ' + (r.error.message || r.error), 'teacher');
+              appendMessage("排查建议：在后端目录运行：D:\\Anaconda\\python.exe d:\\AI-teacher\\zhengjingxuexipingtai\\backend\\app.py", "teacher");
+              appendMessage("或检查端口监听：在 PowerShell 运行：netstat -ano | findstr :5000", "teacher");
+               status.textContent = '';
+               nextBtn.disabled = true;
+               return;
+             }
+            if (!r.res.ok) {
+               var msg = (r.parsed && (r.parsed.error || r.parsed.__rawText)) || r.res.statusText;
+               appendMessage('后端状态异常: ' + msg, 'teacher');
+               status.textContent = '';
+               nextBtn.disabled = true;
+               return;
+             }
+             if (r.parsed && r.parsed.__rawText && looksLikeHtml(r.parsed.__rawText)) {
+               appendMessage('后端返回 HTML，确认 API 地址是否为后端地址而非前端 dev server。当前 API_BASE: ' + API_BASE, 'teacher');
+               nextBtn.disabled = true;
+               return;
+             }
+            // 输出后端可达，不泄露端口信息
+            appendMessage('进入课程', 'teacher');
+             // 请求 start 接口
+             var url = apiUrl(API_PATH.start) + '?file=' + encodeURIComponent(fileName);
+             return requestJson(url, {}).then(function(resp){
+               if (resp.error) {
+                 appendMessage('加载失败: ' + (resp.error.message || resp.error), 'teacher');
+                 status.textContent = '';
+                 return;
+               }
+               if (!resp.res.ok) {
+                 var msg = (resp.parsed && (resp.parsed.error || resp.parsed.__rawText)) || resp.res.statusText;
+                 appendMessage('无法加载剧本: ' + msg, 'teacher');
+                 return;
+               }
+               if (resp.parsed && resp.parsed.__rawText && looksLikeHtml(resp.parsed.__rawText)) {
+                 appendMessage('收到 HTML 响应（非 JSON），请确认 API 指向后端。', 'teacher');
+                 return;
+               }
+               var j = resp.parsed;
+               appendMessage('【剧本文本（前若干）】\n' + ((j.full_text && j.full_text.slice(0,1000)) || ''), 'teacher');
+               totalSegments = j.total || (j.segments && j.segments.length) || 0;
+               status.textContent = '共 ' + totalSegments + ' 段';
+               nextBtn.disabled = false;
+            });
+          });
+        }
+
+        function showNext() {
+          var payload = { file: fileName, current: currentIndex, step: 1 };
+          var url = apiUrl(API_PATH.next);
+          var opts = { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) };
+          requestJson(url, opts).then(function(resp){
+            if (resp.error) {
+              appendMessage('获取下一段失败: ' + (resp.error.message || resp.error), 'teacher');
+              return;
+            }
+            if (!resp.res.ok) {
+              var msg = (resp.parsed && (resp.parsed.error || resp.parsed.__rawText)) || resp.res.statusText;
+              appendMessage('获取下一段失败: ' + msg, 'teacher');
+              return;
+            }
+            if (resp.parsed && resp.parsed.__rawText && looksLikeHtml(resp.parsed.__rawText)) {
+              appendMessage('收到 HTML 响应（非 JSON），请确认 API 指向后端。', 'teacher');
+              return;
+            }
+            var j = resp.parsed;
+            if (j.done) {
+              appendMessage('课程已结束。', 'teacher');
+              nextBtn.disabled = true;
+              // 提问区保持常驻，不隐藏
+              return;
+            }
+            currentIndex = j.index;
+            appendMessage('[' + (j.scene || '') + '] ' + (j.content || ''), 'teacher');
+            status.textContent = '第 ' + (currentIndex + 1) + ' / ' + (j.total || totalSegments);
+            if (j.is_interaction) {
+              askArea.style.display = 'block';
+              questionEl.focus();
+            } else {
+              // 保持提问区常驻（不隐藏）
+            }
+          });
+        }
+
+        // 发起一次 POST 请求并解析响应（返回 promise）
+        function postJson(url, payload) {
+          return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+            .then(function(res){
+              return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; });
+            });
+        }
+
+        // askQuestion：若初次请求网络失败或无响应，依次尝试备用地址并在对话区输出尝试信息
+        function askQuestion() {
+          var q = (questionEl.value || '').trim();
+          if (!q) return;
+          appendMessage(q, 'user');
+          questionEl.value = '';
+          askBtn.disabled = true;
+
+          var payload = { question: q, client_id: clientId, file: fileName };
+
+          // 构造要尝试的 URL 列表（优先当前 API_BASE）
+          var primary = apiUrl(API_PATH.ask);
+          var fallbackBases = [
+            API_BASE.replace(/\/$/, ''), 
+            'http://127.0.0.1:8080',
+            'http://127.0.0.1:5000',
+            'http://localhost:5000'
+          ];
+          // 去重并确保 primary 在首位（可能包含不同端口）
+          var bases = [primary.replace(/\/api\/ai_teacher\/ask$/, '')].concat(fallbackBases.filter(function(b){ return b !== primary.replace(/\/api\/ai_teacher\/ask$/,''); }));
+          var tryUrls = bases.map(function(b){ return b.replace(/\/$/,'') + '/api/ai_teacher/ask'; });
+
+          var i = 0;
+          (function tryNext(){
+            if (i >= tryUrls.length) {
+              askBtn.disabled = false;
+              appendMessage('问答请求失败: Failed to fetch（已尝试所有候选地址）', 'teacher');
+              apiNotice.textContent = '问答失败';
+              return;
+            }
+            var u = tryUrls[i++];
+            // 尝试问答（隐藏具体 URL，保证沉浸式体验）
+            appendMessage('尝试进行问答请求...', 'teacher');
+            postJson(u, payload).then(function(resp){
+              if (resp.error) {
+                appendMessage('请求异常: ' + (resp.error.message || resp.error), 'teacher');
+                return tryNext();
+              }
+              if (!resp.res.ok) {
+                var msg = (resp.parsed && (resp.parsed.error || resp.parsed.__rawText)) || resp.res.statusText;
+                appendMessage('响应错误: ' + msg, 'teacher');
+                return tryNext();
+              }
+              if (resp.parsed && resp.parsed.__rawText && looksLikeHtml(resp.parsed.__rawText)) {
+                appendMessage('收到 HTML 响应（可能为前端 dev server），响应体前200: ' + (resp.parsed.__rawText||'').slice(0,200), 'teacher');
+                return tryNext();
+              }
+              // 成功
+              var j = resp.parsed;
+              if (j.answer) {
+                appendMessage(j.answer, 'teacher');
+                apiNotice.textContent = '已连接';
+              } else if (j.error) {
+                appendMessage('问答出错: ' + j.error, 'teacher');
+              } else {
+                appendMessage('无回答', 'teacher');
+              }
+              askBtn.disabled = false;
+            }).catch(function(err){
+              appendMessage('请求失败: ' + (err.message || err), 'teacher');
+              return tryNext();
+            });
+          })();
+        }
+
+        // 监听回车提交（textarea），已有逻辑留存；确保在未禁用时提交
+        if (questionEl) {
+          questionEl.addEventListener('keydown', function(e){
+            if (e.key === 'Enter' && !e.ctrlKey) {
+              e.preventDefault();
+              if (!askBtn.disabled) askQuestion();
+            }
+          });
+        }
+
+        enterBtn.addEventListener('click', startLesson);
+        nextBtn.addEventListener('click', showNext);
+        askBtn.addEventListener('click', askQuestion);
+
+        // 新增：测试后端按钮逻辑（将输出每次尝试结果到对话窗口）
+        testApiBtn && testApiBtn.addEventListener('click', function(){
+          apiNotice.textContent = '正在测试后端...';
+          var tryHosts = [
+            API_BASE.replace(/\/$/, '') + API_PATH.status,
+            'http://127.0.0.1:8080' + API_PATH.status,
+            'http://127.0.0.1:5000' + API_PATH.status,
+            'http://localhost:5000' + API_PATH.status
+          ];
+          (function tryNext(i){
+            if (i >= tryHosts.length) {
+              appendMessage('所有测试失败。请确认后端已启动并监听端口或检查防火墙。', 'teacher');
+              apiNotice.textContent = '测试失败';
+              return;
+            }
+            var u = tryHosts[i];
+            appendMessage('尝试请求: ' + u, 'teacher');
+            fetch(u, { method: 'GET' })
+              .then(function(res){ return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; }); })
+              .then(function(r){
+                if (r.error) {
+                  appendMessage('请求异常: ' + (r.error.message || r.error), 'teacher');
+                  return tryNext(i+1);
+                }
+                if (!r.res.ok) {
+                  appendMessage('响应错误: ' + r.res.status + ' ' + r.res.statusText, 'teacher');
+                  return tryNext(i+1);
+                }
+                if (r.parsed && r.parsed.__rawText) {
+                  appendMessage('收到 HTML 响应（可能为前端 dev server），响应体前200: ' + (r.parsed.__rawText||'').slice(0,200), 'teacher');
+                  return tryNext(i+1);
+                }
+                appendMessage('后端测试通过，返回: ' + JSON.stringify(r.parsed).slice(0,400), 'teacher');
+                apiNotice.textContent = '已连接';
+              })
+              .catch(function(err){
+                appendMessage('请求失败: ' + (err.message || err), 'teacher');
+                return tryNext(i+1);
+              });
+          })(0);
+        });
+      })();
+    </script>
   </body>
 </html>
