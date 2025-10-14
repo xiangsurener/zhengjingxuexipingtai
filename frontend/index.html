@@ -141,7 +141,7 @@
           pingBackend().then(function(r){
             if (r.error) {
               appendMessage('无法连接后端: ' + (r.error.message || r.error), 'teacher');
-              appendMessage("排查建议：在后端目录运行：D:\\Anaconda\\python.exe d:\\AI-teacher\\zhengjingxuexipingtai\\backend\\app.py", "teacher");
+              appendMessage("排查建议：在后端目录运行:zhengjingxuexipingtai\\backend\\app.py", "teacher");
               appendMessage("或检查端口监听：在 PowerShell 运行：netstat -ano | findstr :5000", "teacher");
                status.textContent = '';
                nextBtn.disabled = true;
@@ -311,46 +311,83 @@
         nextBtn.addEventListener('click', showNext);
         askBtn.addEventListener('click', askQuestion);
 
-        // 新增：测试后端按钮逻辑（将输出每次尝试结果到对话窗口）
+        // 新增：带超时的 fetch，防止长时间挂起
+        function fetchWithTimeout(url, opts, timeoutMs) {
+          timeoutMs = timeoutMs || 1500;
+          return Promise.race([
+            fetch(url, opts),
+            new Promise(function(_, reject){
+              setTimeout(function(){ reject(new Error('timeout')); }, timeoutMs);
+            })
+          ]);
+        }
+
+        // 新增：在本机 host 上自动探测后端可用端口并设置 API_BASE
+        async function discoverBackend(ports) {
+          ports = ports || [5000,5001,5002,5003,5004,5005,5006,5007,5008,5009,5010,8000,8080,3000];
+          var host = location.hostname || 'localhost';
+          var proto = location.protocol || 'http:';
+          appendMessage('正在自动检测后端可用端口...', 'teacher');
+          for (var i = 0; i < ports.length; i++) {
+            var p = ports[i];
+            var tryUrl = proto + '//' + host + ':' + p + '/__status';
+            try {
+              var r = await fetchWithTimeout(tryUrl, { method: 'GET' }, 1200);
+              // 若返回且是JSON或文本，视为成功
+              if (r && r.ok) {
+                API_BASE = proto + '//' + host + ':' + p;
+                // 更新 UI
+                apiBaseInput.value = API_BASE;
+                apiNotice.textContent = '已发现后端并自动设置地址（端口已匹配）';
+                appendMessage('已找到可用后端（已自动配置），可开始学习', 'teacher');
+                return API_BASE;
+              }
+            } catch (e) {
+              // 忽略单次探测错误，继续下一个端口
+            }
+          }
+          appendMessage('未能自动发现后端，请手动设置后端地址或检查防火墙', 'teacher');
+          apiNotice.textContent = '自动发现失败';
+          return null;
+        }
+
+        // 页面加载时尝试自动发现（不阻塞 UI）
+        (function(){
+          // 延迟一点以便 DOM 完全就绪
+          setTimeout(function(){
+            // 仅在用户未手动设置地址时自动发现
+            if (!apiBaseInput.value || apiBaseInput.value.trim() === '') {
+              discoverBackend();
+            }
+          }, 300);
+        })();
+
+        // 修改：测试后端按钮现在优先调用 discoverBackend，再简单检测 __status（保持原语义）
         testApiBtn && testApiBtn.addEventListener('click', function(){
           apiNotice.textContent = '正在测试后端...';
-          var tryHosts = [
-            API_BASE.replace(/\/$/, '') + API_PATH.status,
-            'http://127.0.0.1:8080' + API_PATH.status,
-            'http://127.0.0.1:5000' + API_PATH.status,
-            'http://localhost:5000' + API_PATH.status
-          ];
-          (function tryNext(i){
-            if (i >= tryHosts.length) {
-              appendMessage('所有测试失败。请确认后端已启动并监听端口或检查防火墙。', 'teacher');
-              apiNotice.textContent = '测试失败';
-              return;
-            }
-            var u = tryHosts[i];
-            appendMessage('尝试请求: ' + u, 'teacher');
+          // 先尝试自动发现并更新 API_BASE
+          discoverBackend().then(function(found){
+            var u = apiUrl(API_PATH.status);
             fetch(u, { method: 'GET' })
               .then(function(res){ return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; }); })
               .then(function(r){
                 if (r.error) {
-                  appendMessage('请求异常: ' + (r.error.message || r.error), 'teacher');
-                  return tryNext(i+1);
+                  appendMessage('后端响应异常。', 'teacher');
+                  apiNotice.textContent = '测试失败';
+                  return;
                 }
                 if (!r.res.ok) {
-                  appendMessage('响应错误: ' + r.res.status + ' ' + r.res.statusText, 'teacher');
-                  return tryNext(i+1);
+                  appendMessage('后端状态异常。', 'teacher');
+                  apiNotice.textContent = '测试失败';
+                  return;
                 }
-                if (r.parsed && r.parsed.__rawText) {
-                  appendMessage('收到 HTML 响应（可能为前端 dev server），响应体前200: ' + (r.parsed.__rawText||'').slice(0,200), 'teacher');
-                  return tryNext(i+1);
-                }
-                appendMessage('后端测试通过，返回: ' + JSON.stringify(r.parsed).slice(0,400), 'teacher');
+                appendMessage('后端状态良好。', 'teacher');
                 apiNotice.textContent = '已连接';
-              })
-              .catch(function(err){
-                appendMessage('请求失败: ' + (err.message || err), 'teacher');
-                return tryNext(i+1);
+              }).catch(function(err){
+                appendMessage('后端检测失败：' + (err.message || err), 'teacher');
+                apiNotice.textContent = '测试失败';
               });
-          })(0);
+          });
         });
       })();
     </script>
