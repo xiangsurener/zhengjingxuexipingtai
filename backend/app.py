@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from flask_cors import CORS
 from config import config
 
@@ -7,6 +7,237 @@ from routes.lesson import bp as lesson_bp
 from routes.qa import bp as qa_bp
 from routes.assignment import bp as assignment_bp
 from routes.report import bp as report_bp
+from routes.auth import bp as auth_bp
+from routes.progress import bp as progress_bp
+
+from db import SessionLocal, init_db
+
+# 新增：AI 教师相关依赖与类（参考 test.py）
+import os
+import re
+import sys
+import traceback
+import socket
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv())
+
+# 尝试导入 LLM 相关库，若失败则提供降级占位实现
+try:
+    from langchain_community.llms import Tongyi
+    from langchain_core.runnables import RunnableSequence
+    from langchain.prompts import PromptTemplate
+
+    class QwenTurboTongyi(Tongyi):
+        model_name: str = "qwen-turbo"
+
+    class QwenMaxTongyi(Tongyi):
+        model_name: str = "qwen-max"
+    LLM_AVAILABLE = True
+except Exception:
+    # 降级占位：当无法导入 LLM 时，返回固定回答，避免服务崩溃
+    LLM_AVAILABLE = False
+
+    class QwenTurboTongyi:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __call__(self, prompt=None, **kwargs):
+            return "（本地未配置LLM，返回占位回答）"
+
+    class RunnableSequence:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, payload):
+            return "（本地未配置LLM，无法生成真实回答）"
+
+    class PromptTemplate:
+        def __init__(self, template=None, input_variables=None):
+            self.template = template
+
+# 新增：将要返回给前端的 segment 剥离敏感字段（如 answer）
+def _sanitize_segment_for_client(seg: dict):
+    # 仅复制对前端可见的字段，剔除内部字段（如 answer）
+    if not isinstance(seg, dict):
+        return seg
+    allowed = {}
+    for k, v in seg.items():
+        if k == "answer":
+            continue
+        allowed[k] = v
+    # 确保至少包含基础字段
+    allowed.setdefault("scene", seg.get("scene", ""))
+    allowed.setdefault("content", seg.get("content", ""))
+    allowed.setdefault("type", seg.get("type", "dialogue"))
+    return allowed
+
+# ===== 新增：LMService - 统一封装 LLM 初始化与调用逻辑（兼容降级） =====
+class LMService:
+    """
+    轻量封装：负责 LLM 实例化、PromptTemplate 构造及 RunnableSequence 调用细节。
+    如果环境中未安装 LLM 库，提供降级占位实现，保持返回类型为字符串。
+    """
+    def __init__(self):
+        self.available = LLM_AVAILABLE
+        if self.available:
+            # 按需初始化两个 LLM 实例（teacher 与 qa）
+            self.teacher_llm = QwenTurboTongyi(temperature=0.7)
+            self.qa_llm = QwenTurboTongyi(temperature=1)
+            # QA prompt template（保留现有字符串模板含义）
+            self.qa_template = '''
+                你的名字是AI教师,当有人问问题的时候,你都会回答{question}, 内容尽量详细
+            '''
+            try:
+                self.qa_prompt = PromptTemplate(template=self.qa_template, input_variables=["question"])
+                # RunnableSequence 的组合在不同版本上行为不同，兼容处理
+                if hasattr(RunnableSequence, "__or__"):
+                    self.qa_chain = RunnableSequence(self.qa_prompt | self.qa_llm)
+                else:
+                    self.qa_chain = RunnableSequence(self.qa_prompt, self.qa_llm)
+            except Exception:
+                # 若 PromptTemplate / RunnableSequence 初始化异常，降级为简单占位链
+                self.available = False
+                self.qa_chain = RunnableSequence()
+        else:
+            # LLM 不可用时的占位实现（与现有降级兼容）
+            self.teacher_llm = None
+            self.qa_llm = None
+            self.qa_chain = RunnableSequence()
+
+    def run_qa(self, question: str, chat_history=None, script_context=None):
+        """统一调用 QA 链并返回字符串，内部兼容 invoke 或直接调用。
+        chat_history: list of {"role","text"} 最近对话
+        script_context: list of strings（与问题相关的剧本段落）
+        """
+        if not self.available:
+            return "（本地未配置LLM，无法生成真实回答）"
+        # 构造 prompt：系统指令（教师身份） + 剧本上下文 + 聊天历史 + 本次问题
+        system_inst = ("你是课程中的 AI 教师，语气亲切、专业、适合课堂讲解。回答应参考课程剧本上下文，"
+                       "并指出若有引用剧本文本需明确标注。回答需要清晰、分步并适度举例。")
+        parts = [system_inst]
+        if script_context:
+            parts.append("以下为与问题相关的课程剧本片段（仅作参考）：")
+            for idx, sc in enumerate(script_context, 1):
+                parts.append(f"片段{idx}: {sc}")
+        if chat_history:
+            parts.append("以下为最近对话历史：")
+            for h in chat_history:
+                r = h.get("role", "user")
+                t = h.get("text", "")
+                parts.append(f"{r}: {t}")
+        parts.append("问题：" + question)
+        prompt_input = "\n\n".join(parts)
+        try:
+            # 若 qa_chain 支持 invoke
+            if hasattr(self.qa_chain, "invoke"):
+                resp = self.qa_chain.invoke({"question": prompt_input})
+            else:
+                resp = self.qa_chain({"question": prompt_input})
+            return str(resp)
+        except Exception as e:
+            return f"回答生成出错：{e}"
+# ===== end LMService =====
+
+# AI 教师实现（简化自 test.py）
+class AITeacherGame:
+    def __init__(self):
+        # 使用 LMService 统一管理 LLM/Prompt/Chain 的初始化与调用，保持原行为
+        self.lm = LMService()
+        # 兼容性：保留 teacher_llm 与 qa_chain 字段以防其他代码依赖
+        self.teacher_llm = getattr(self.lm, "teacher_llm", None)
+        self.qa_chain = getattr(self.lm, "qa_chain", None)
+
+    def load_script(self, file_path: str):
+        """读取剧本文件并分段，返回段列表"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return self._parse_script_segments(content)
+        except FileNotFoundError:
+            return []
+
+    def _parse_script_segments(self, content: str):
+        """
+        按空行分段；若段落包含以 A. B. C. 开头的选项，则提取 choices（列表）
+        并尝试解析紧随段落中或下一行的答案标注形式：【答案: X】
+        """
+        segments = []
+        if not content:
+            return segments
+
+        # 以一个或多个空行分割段落（兼容 \r\n 与 \n）
+        parts = re.split(r'\r?\n\s*\r?\n+', content)
+
+        for part in parts:
+            text = part.strip()
+            if not text:
+                continue
+
+            # 默认
+            scene = ""
+            m = re.match(r'^\s*\[(.*?)\]\s*(.*)$', text, re.DOTALL)
+            if m:
+                scene = m.group(1).strip()
+                body = m.group(2).strip()
+            else:
+                body = text
+
+            # 查找选项行（以 A. 或 A）开头的多行选择
+            lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+            choices = []
+            answer = None
+            # collect lines starting with A. / B. / C. (允许多种格式)
+            choice_pattern = re.compile(r'^\s*([A-Z])\s*[\.：:)\-]?\s*(.+)$', re.IGNORECASE)
+            other_lines = []
+            for ln in lines:
+                cm = choice_pattern.match(ln)
+                if cm:
+                    label = cm.group(1).upper()
+                    text_choice = cm.group(2).strip().strip('"“”')
+                    choices.append({'label': label, 'text': text_choice})
+                else:
+                    other_lines.append(ln)
+
+            # 尝试从 body 中提取答案标注，格式例如：【答案:B】 或 【答案: B】 或 (答案:B)
+            ans_m = re.search(r'【\s*答案\s*[:：]\s*([A-Z])\s*】', body, re.IGNORECASE)
+            if not ans_m:
+                ans_m = re.search(r'\(答案\s*[:：]?\s*([A-Z])\)', body, re.IGNORECASE)
+            if ans_m:
+                answer = ans_m.group(1).upper()
+
+            # 如果没有在 body 找到答案，也尝试在 other_lines 的末尾（可能作者在下一行单独标注）
+            if not answer and other_lines:
+                for ol in reversed(other_lines[-2:]):
+                    ans_m2 = re.search(r'【\s*答案\s*[:：]\s*([A-Z])\s*】', ol, re.IGNORECASE) or re.search(r'\(答案\s*[:：]?\s*([A-Z])\)', ol, re.IGNORECASE)
+                    if ans_m2:
+                        answer = ans_m2.group(1).upper()
+                        break
+
+            segment = {
+                'type': 'dialogue',
+                'scene': scene,
+                'content': body,
+            }
+            if choices:
+                segment['choices'] = choices
+            if answer:
+                segment['answer'] = answer  # 仅服务器端保存，响应给前端时会剥离
+            segments.append(segment)
+
+        return segments
+
+    def is_interaction_point(self, segment):
+        interaction_keywords = ['互动提问', '提问', '问题', '选择', 'A.', 'B.', 'C.']
+        content = segment['content'] if isinstance(segment, dict) else segment
+        return any(keyword in content for keyword in interaction_keywords)
+
+    def ask_question(self, question: str):
+        """通过 qa_chain 回答问题，返回字符串（由 LMService 统一处理异常与降级）"""
+        return self.lm.run_qa(question)
+
+# 实例化 AI 教师（可在模块级复用）
+teacher = AITeacherGame()
 
 # 新增：AI 教师相关依赖与类（参考 test.py）
 import os
@@ -237,14 +468,50 @@ teacher = AITeacherGame()
 
 def create_app():
     app = Flask(__name__, static_folder=None)
+<<<<<<< HEAD
+    # 允许所有来源访问 /api/*（开发阶段）
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
+=======
+    app.config["SECRET_KEY"] = config.SECRET_KEY
+    app.config["DATABASE_URL"] = config.DATABASE_URL
+
+    init_db()
+
     # 允许所有来源访问 /api/*（开发阶段）
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+    @app.before_request
+    def bind_session():
+        g.db = SessionLocal()
+
+    @app.teardown_request
+    def cleanup_session(exception=None):
+        session = g.pop("db", None)
+        if session is None:
+            return
+        try:
+            if exception:
+                session.rollback()
+            else:
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
+        finally:
+            session.close()
+>>>>>>> 9043746 (更新：前端结构和登录逻辑)
+
     # 蓝图注册并加上统一前缀 /api
+    app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(lesson_bp, url_prefix="/api/lesson")
     app.register_blueprint(qa_bp, url_prefix="/api/qa")
     app.register_blueprint(assignment_bp, url_prefix="/api/assignment")
     app.register_blueprint(report_bp, url_prefix="/api/report")
+<<<<<<< HEAD
+=======
+    app.register_blueprint(progress_bp, url_prefix="/api/progress")
+>>>>>>> 9043746 (更新：前端结构和登录逻辑)
 
     # 静态前端文件目录（项目根的 frontend）
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -703,4 +970,8 @@ if __name__ == "__main__":
 		print("Failed to start backend:", e)
 		traceback.print_exc()
 		print("提示：如果是 Windows，请确认防火墙没有阻止 Python 监听该端口；在 PowerShell 可运行：netstat -ano | findstr :{}".format(port))
+<<<<<<< HEAD
 		raise
+=======
+		raise
+>>>>>>> 9043746 (更新：前端结构和登录逻辑)
