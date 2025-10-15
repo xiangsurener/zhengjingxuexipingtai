@@ -129,7 +129,6 @@ export function AuthProvider({ children }) {
     const target = redirectPath || location.pathname
     setPrompt({ redirect: target })
     storeRedirect(target)
-    navigate(`/login?redirect=${encodeURIComponent(target)}`)
     return false
   }
 
@@ -170,13 +169,16 @@ function LoginPrompt({ prompt, onClose }) {
           登录后即可同步学习进度，并继续浏览该内容。
         </p>
         <div className="flex flex-col gap-2">
-          <a
-            href={`/login?redirect=${encodeURIComponent(redirect)}`}
+          <button
+            type="button"
+            onClick={() => {
+              onClose()
+              window.location.assign(`/login?redirect=${encodeURIComponent(redirect)}`)
+            }}
             className="inline-flex w-full justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
-            onClick={onClose}
           >
             前往登录
-          </a>
+          </button>
           <button
             type="button"
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50"

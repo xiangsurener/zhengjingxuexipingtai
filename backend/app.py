@@ -468,10 +468,8 @@ teacher = AITeacherGame()
 
 def create_app():
     app = Flask(__name__, static_folder=None)
-<<<<<<< HEAD
     # 允许所有来源访问 /api/*（开发阶段）
     CORS(app, resources={r"/api/*": {"origins": "*"}})
-=======
     app.config["SECRET_KEY"] = config.SECRET_KEY
     app.config["DATABASE_URL"] = config.DATABASE_URL
 
@@ -500,7 +498,6 @@ def create_app():
                     raise
         finally:
             session.close()
->>>>>>> 9043746 (更新：前端结构和登录逻辑)
 
     # 蓝图注册并加上统一前缀 /api
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -508,10 +505,7 @@ def create_app():
     app.register_blueprint(qa_bp, url_prefix="/api/qa")
     app.register_blueprint(assignment_bp, url_prefix="/api/assignment")
     app.register_blueprint(report_bp, url_prefix="/api/report")
-<<<<<<< HEAD
-=======
     app.register_blueprint(progress_bp, url_prefix="/api/progress")
->>>>>>> 9043746 (更新：前端结构和登录逻辑)
 
     # 静态前端文件目录（项目根的 frontend）
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -970,8 +964,5 @@ if __name__ == "__main__":
 		print("Failed to start backend:", e)
 		traceback.print_exc()
 		print("提示：如果是 Windows，请确认防火墙没有阻止 Python 监听该端口；在 PowerShell 可运行：netstat -ano | findstr :{}".format(port))
-<<<<<<< HEAD
 		raise
-=======
-		raise
->>>>>>> 9043746 (更新：前端结构和登录逻辑)
+		
