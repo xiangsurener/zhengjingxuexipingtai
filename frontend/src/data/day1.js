@@ -27,6 +27,10 @@ export const day1Lesson = {
       type: 'lecture',
       speaker: 'AI教师',
       hero: '穿越神经网络的发展时间线',
+      video: {
+        src: '//player.bilibili.com/player.html?bvid=BV15q421A7tB&page=1',
+        title: '神经网络发展历程'
+      },
       transcript: [
         '1943 年，McCulloch 与 Pitts 提出的初代神经元模型奠定了神经网络的想法，尽管它只能处理最简单的逻辑。',
         '2006 年 Hinton 提出预训练 + 微调方法，大幅缓解深层网络训练困难，随后 2012 年 AlexNet 在 ImageNet 比赛上让识别错误率从 26% 降至 15%。'
@@ -34,8 +38,7 @@ export const day1Lesson = {
       keyPoints: [
         '早期模型结构朴素，功能有限',
         '深度学习的复兴依赖更好的算法与数据集'
-      ],
-      mediaPlaceholder: '历史故事动画占位'
+      ]
     },
     {
       id: 'history-quiz',
