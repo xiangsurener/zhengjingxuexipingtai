@@ -42,6 +42,10 @@ export const day1Lesson = {
       type: 'lecture',
       speaker: 'AI教师',
       hero: '穿越神经网络的发展时间线',
+      video: {
+        src: '//player.bilibili.com/player.html?bvid=BV15q421A7tB&page=1',
+        title: '神经网络发展历程'
+      },
       transcript: [
         '别看现在AI这么火，它的"祖师爷"其实是70多年前的两个学霸——心理学家McCulloch和数学家Pitts。他们当时用灯泡的亮灭模拟人类神经元的"开"和"关"，但这个初代模型特别笨，只能解决"与或非"这类逻辑问题。',
         '直到1958年，Frank Rosenblatt提出感知机（Perceptron），引入了可学习的权重参数，这才让AI能处理更复杂的模式。但真正的突破发生在2006年，Hinton教授带着预训练+微调方法，让深层网络终于能"长大成人"。',

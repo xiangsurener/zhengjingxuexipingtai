@@ -195,7 +195,21 @@ function SegmentContent({ segment, quizState, onSelectOption }) {
 
   return (
     <div className="space-y-6">
-      {segment.mediaPlaceholder && (
+      {segment.video && (
+        <div className="rounded-2xl overflow-hidden">
+          <div className="aspect-video">
+            <iframe
+              src={segment.video.src}
+              className="w-full h-full"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              title={segment.video.title}
+            />
+          </div>
+        </div>
+      )}
+      {!segment.video && segment.mediaPlaceholder && (
         <div className="rounded-2xl bg-slate-100 border border-dashed border-slate-300 aspect-video flex items-center justify-center text-slate-500 text-sm">
           {segment.mediaPlaceholder || '视频占位'}
         </div>
