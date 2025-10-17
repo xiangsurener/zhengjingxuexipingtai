@@ -8,6 +8,7 @@ import Login from './pages/Login'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import { useAuth } from './hooks/useAuth'
+import AiTeacher from './pages/AiTeacher'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/lesson/:id" element={<ProtectedRoute><Lesson /></ProtectedRoute>} />
           <Route path="/assignment/:id" element={<Assignment />} />
           <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
+          <Route path="/ai-teacher" element={<ProtectedRoute><AiTeacher /></ProtectedRoute>} />
           <Route path="*" element={
             <div className="text-center">
               <p className="text-lg">页面不存在</p>
