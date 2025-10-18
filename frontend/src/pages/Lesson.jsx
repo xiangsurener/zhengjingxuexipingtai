@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { day1Lesson } from '../data/day1'
@@ -9,20 +9,55 @@ const lessons = {
   nn: day1Lesson
 }
 
+const QUIZ_STORAGE_PREFIX = 'lp.lesson.quizState.'
+const QUIZ_LOCK_PREFIX = 'lp.lesson.quizLocked.'
+
 export default function Lesson() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const lesson = lessons[id]
   const [currentIndex, setCurrentIndex] = useState(0)
   const [highestUnlockedIndex, setHighestUnlockedIndex] = useState(0)
   const [quizState, setQuizState] = useState({})
+  const [answersLocked, setAnswersLocked] = useState(false)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
   const { user } = useAuth()
   const totalSegments = lesson?.segments.length ?? 0
+  const quizStorageKey = lesson ? `${QUIZ_STORAGE_PREFIX}${lesson.id}` : null
+  const lockStorageKey = lesson ? `${QUIZ_LOCK_PREFIX}${lesson.id}` : null
 
   useEffect(() => {
     setCurrentIndex(0)
     setHighestUnlockedIndex(0)
     setQuizState({})
+    setAnswersLocked(false)
+    setShowSubmitConfirm(false)
   }, [id])
+
+  useEffect(() => {
+    if (!quizStorageKey) return
+    try {
+      const raw = localStorage.getItem(quizStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') {
+        setQuizState(parsed)
+      }
+    } catch (err) {
+      console.warn('读取测验记录失败', err)
+    }
+  }, [quizStorageKey])
+
+  useEffect(() => {
+    if (!lockStorageKey) return
+    try {
+      const locked = localStorage.getItem(lockStorageKey) === 'true'
+      setAnswersLocked(locked)
+    } catch (err) {
+      console.warn('读取答案锁定状态失败', err)
+      setAnswersLocked(false)
+    }
+  }, [lockStorageKey])
 
   useEffect(() => {
     if (!lesson || !user) return
@@ -75,6 +110,58 @@ export default function Lesson() {
     setCurrentIndex(nextIndex)
   }
 
+  const persistQuizState = (state) => {
+    if (!quizStorageKey) return
+    try {
+      localStorage.setItem(quizStorageKey, JSON.stringify(state))
+    } catch (err) {
+      console.warn('保存测验记录失败', err)
+    }
+  }
+
+  const navigateToSummary = () => {
+    if (!lesson) return
+    navigate(`/lesson/${lesson.id}/summary`, {
+      state: {
+        lessonId: lesson.id,
+        highestUnlockedIndex: Math.min(highestUnlockedIndex, totalSegments - 1),
+        quizState,
+        answersLocked: true
+      }
+    })
+  }
+
+  const confirmSubmitAnswers = () => {
+    if (!lesson) return
+    if (totalSegments > 0) {
+      persistProgress(totalSegments - 1)
+    }
+    persistQuizState(quizState)
+    if (lockStorageKey) {
+      try {
+        localStorage.setItem(lockStorageKey, 'true')
+      } catch (err) {
+        console.warn('保存答案锁定状态失败', err)
+      }
+    }
+    setAnswersLocked(true)
+    setShowSubmitConfirm(false)
+    navigateToSummary()
+  }
+
+  const goToSummary = () => {
+    if (!lesson) return
+    if (answersLocked) {
+      navigateToSummary()
+    } else {
+      setShowSubmitConfirm(true)
+    }
+  }
+
+  const cancelSubmitConfirm = () => {
+    setShowSubmitConfirm(false)
+  }
+
   if (!lesson) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-12">
@@ -91,16 +178,22 @@ export default function Lesson() {
   const progressPercent = segments.length > 1
     ? Math.round((clampedUnlockedIndex / (segments.length - 1)) * 100)
     : 100
+  const isLastSegment = segments.length > 0 && currentIndex === segments.length - 1
 
   const onSelectOption = (segmentId, optionKey, answer, explanation) => {
-    setQuizState(prev => ({
-      ...prev,
-      [segmentId]: {
-        selected: optionKey,
-        isCorrect: optionKey === answer,
-        explanation
+    if (answersLocked) return
+    setQuizState(prev => {
+      const next = {
+        ...prev,
+        [segmentId]: {
+          selected: optionKey,
+          isCorrect: optionKey === answer,
+          explanation
+        }
       }
-    }))
+      persistQuizState(next)
+      return next
+    })
   }
 
   return (
@@ -136,6 +229,7 @@ export default function Lesson() {
               segment={segment}
               quizState={quizState[segment.id]}
               onSelectOption={onSelectOption}
+              answersLocked={answersLocked}
             />
           </div>
 
@@ -148,17 +242,28 @@ export default function Lesson() {
               上一段
             </button>
             <div className="flex-1 text-center text-sm text-slate-500">
-              {segment.type === 'quiz'
-                ? '选择答案后查看解释，再点击下一段继续'
-                : '阅读完本段内容后继续下一段'}
+              {isLastSegment
+                ? '点击“前往课程总结”查看学习进度、测验解析与作业入口'
+                : segment.type === 'quiz'
+                  ? '选择答案后继续下一段，解析将在课程总结中查看'
+                  : '阅读完本段内容后继续下一段'}
             </div>
-            <button
-              onClick={goToNextSegment}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-              disabled={currentIndex === segments.length - 1}
-            >
-              下一段
-            </button>
+            {isLastSegment ? (
+              <button
+                onClick={goToSummary}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                前往课程总结
+              </button>
+            ) : (
+              <button
+                onClick={goToNextSegment}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
+                disabled={currentIndex === segments.length - 1}
+              >
+                下一段
+              </button>
+            )}
           </div>
         </main>
 
@@ -169,14 +274,21 @@ export default function Lesson() {
             highestUnlockedIndex={highestUnlockedIndex}
             onJump={goToSegment}
             quizState={quizState}
+            answersLocked={answersLocked}
           />
         </aside>
       </div>
+      {showSubmitConfirm && (
+        <SubmitConfirmModal
+          onConfirm={confirmSubmitAnswers}
+          onCancel={cancelSubmitConfirm}
+        />
+      )}
     </div>
   )
 }
 
-function SegmentContent({ segment, quizState, onSelectOption }) {
+function SegmentContent({ segment, quizState, onSelectOption, answersLocked }) {
   if (segment.type === 'quiz') {
     return (
       <div className="space-y-4">
@@ -190,9 +302,11 @@ function SegmentContent({ segment, quizState, onSelectOption }) {
             return (
               <label
                 key={opt.key}
-                className={`flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition ${
-                  checked ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-200'
-                }`}
+                className={`flex items-center gap-3 rounded-xl border p-3 transition ${
+                  checked
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:border-blue-200'
+                } ${answersLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
               >
                 <input
                   type="radio"
@@ -201,6 +315,7 @@ function SegmentContent({ segment, quizState, onSelectOption }) {
                   checked={checked}
                   onChange={() => onSelectOption(segment.id, opt.key, segment.answer, segment.explanation)}
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                  disabled={answersLocked}
                 />
                 <span className="text-slate-700 font-medium">{opt.key}</span>
                 <span className="text-slate-700 flex-1">{opt.text}</span>
@@ -208,20 +323,11 @@ function SegmentContent({ segment, quizState, onSelectOption }) {
             )
           })}
         </div>
-        {quizState?.selected && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-sm ${
-              quizState.isCorrect
-                ? 'border-green-200 bg-green-50 text-green-700'
-                : 'border-amber-200 bg-amber-50 text-amber-700'
-            }`}
-          >
-            <p className="font-medium">
-              {quizState.isCorrect ? '回答正确！' : `正确答案是 ${segment.answer}`}
-            </p>
-            <p className="mt-1 leading-relaxed">{segment.explanation}</p>
-          </div>
-        )}
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {answersLocked
+            ? '答案已锁定，课程总结中将展示解析与得分。'
+            : '本节不会立即公布答案，完成课程并提交后可在总结页面查看解析。'}
+        </div>
       </div>
     )
   }
@@ -260,7 +366,7 @@ function SegmentContent({ segment, quizState, onSelectOption }) {
   )
 }
 
-function OutlineCard({ segments, currentIndex, highestUnlockedIndex, onJump, quizState }) {
+function OutlineCard({ segments, currentIndex, highestUnlockedIndex, onJump, quizState, answersLocked }) {
   return (
     <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 space-y-4">
       <h3 className="text-lg font-semibold text-slate-900">课程大纲</h3>
@@ -279,17 +385,17 @@ function OutlineCard({ segments, currentIndex, highestUnlockedIndex, onJump, qui
                   locked
                     ? 'border-dashed border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
                     : isActive
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : finished
-                        ? 'border-green-200 bg-green-50 text-green-700'
-                        : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : finished
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">{seg.title}</span>
                   {seg.type === 'quiz' && quizResult?.selected && (
-                    <span className={`text-xs font-semibold ${quizResult.isCorrect ? 'text-green-600' : 'text-amber-600'}`}>
-                      {quizResult.isCorrect ? '✔' : '提示'}
+                    <span className="text-xs font-semibold text-slate-500">
+                      {answersLocked ? '已锁定' : '已作答'}
                     </span>
                   )}
                 </div>
@@ -299,6 +405,37 @@ function OutlineCard({ segments, currentIndex, highestUnlockedIndex, onJump, qui
           )
         })}
       </ol>
+    </div>
+  )
+}
+
+function SubmitConfirmModal({ onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+        <div>
+          <h3 className="text-xl font-semibold text-slate-900">确认提交答案？</h3>
+          <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+            提交后所有选择题答案将锁定，无法在课程中修改。你可以在课程总结页面查看正确答案与解析。
+          </p>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            继续检查
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+          >
+            是的，确认提交
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
