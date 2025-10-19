@@ -18,7 +18,6 @@ Base = declarative_base()
 
 def init_db():
     # Import models for metadata registration
-    from models import User, LessonProgress  # noqa: F401
+    from models import User, LessonProgress, AssignmentScore  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
-

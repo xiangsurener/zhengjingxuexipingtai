@@ -9,6 +9,7 @@ import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import { useAuth } from './hooks/useAuth'
 import AiTeacher from './pages/AiTeacher'
+import CourseSummary from './pages/CourseSummary'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/" element={<Courses />} />
           <Route path="/login" element={<Login />} />
           <Route path="/lesson/:id" element={<ProtectedRoute><Lesson /></ProtectedRoute>} />
+          <Route path="/lesson/:id/summary" element={<ProtectedRoute><CourseSummary /></ProtectedRoute>} />
           <Route path="/assignment/:id" element={<Assignment />} />
           <Route path="/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
           <Route path="/ai-teacher" element={<ProtectedRoute><AiTeacher /></ProtectedRoute>} />
