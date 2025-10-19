@@ -224,15 +224,34 @@
           });
         }
 
-        // 发起一次 POST 请求并解析响应（返回 promise）
-        function postJson(url, payload) {
-          return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-            .then(function(res){
-              return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; });
-            });
+        // 新增：带超时的 fetch，防止长时间挂起（默认延长到 15000ms）
+        function fetchWithTimeout(url, opts, timeoutMs) {
+          timeoutMs = typeof timeoutMs === 'number' ? timeoutMs : 15000; // 默认 15s
+          return Promise.race([
+            fetch(url, opts),
+            new Promise(function(_, reject){
+              setTimeout(function(){ reject(new Error('timeout')); }, timeoutMs);
+            })
+          ]);
         }
 
-        // askQuestion：若初次请求网络失败或无响应，依次尝试备用地址并在对话区输出尝试信息
+        // 更稳健的 postJson（使用 fetchWithTimeout，统一返回 {res, parsed} 或 {error}）
+        function postJson(url, payload, timeoutMs) {
+          timeoutMs = typeof timeoutMs === 'number' ? timeoutMs : 10000;
+          return fetchWithTimeout(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+          }, timeoutMs)
+          .then(function(res){
+            return safeParse(res).then(function(parsed){ return { res: res, parsed: parsed }; });
+          })
+          .catch(function(err){
+            return { error: err };
+          });
+        }
+
+        // askQuestion：对候选 URL 逐一重试，单 URL 最多重试两次，成功后回写 API_BASE 输入框
         function askQuestion() {
           var q = (questionEl.value || '').trim();
           if (!q) return;
@@ -242,58 +261,102 @@
 
           var payload = { question: q, client_id: clientId, file: fileName };
 
-          // 构造要尝试的 URL 列表（优先当前 API_BASE）
-          var primary = apiUrl(API_PATH.ask);
+          // 候选 base 列表（优先当前 API_BASE，再常见本地地址与端口）
+          var currentBase = (API_BASE || '').replace(/\/$/, '');
           var fallbackBases = [
-            API_BASE.replace(/\/$/, ''), 
+            currentBase || '',
             'http://127.0.0.1:8080',
             'http://127.0.0.1:5000',
-            'http://localhost:5000'
-          ];
-          // 去重并确保 primary 在首位（可能包含不同端口）
-          var bases = [primary.replace(/\/api\/ai_teacher\/ask$/, '')].concat(fallbackBases.filter(function(b){ return b !== primary.replace(/\/api\/ai_teacher\/ask$/,''); }));
+            'http://localhost:5000',
+            'http://localhost:5001',
+            'http://localhost:8000'
+          ].filter(function(b){ return b; });
+
+          // 去重
+          var seen = {};
+          var bases = [];
+          for (var bi=0; bi<fallbackBases.length; bi++){
+            var b = fallbackBases[bi];
+            if (!seen[b]) { bases.push(b); seen[b]=true; }
+          }
+
           var tryUrls = bases.map(function(b){ return b.replace(/\/$/,'') + '/api/ai_teacher/ask'; });
 
+          var tried = [];
           var i = 0;
           (function tryNext(){
             if (i >= tryUrls.length) {
               askBtn.disabled = false;
-              appendMessage('问答请求失败: Failed to fetch（已尝试所有候选地址）', 'teacher');
+              appendMessage('问答请求失败：已尝试所有候选地址。请确认后端已启动或在上方手动设置 API 地址并点击“设置 API”。', 'teacher');
+              if (tried.length) {
+                appendMessage('已尝试地址示例（前 10）：', 'teacher');
+                for (var k=0;k<Math.min(10,tried.length);k++) appendMessage('  ' + tried[k], 'teacher');
+              }
               apiNotice.textContent = '问答失败';
               return;
             }
             var u = tryUrls[i++];
-            // 尝试问答（隐藏具体 URL，保证沉浸式体验）
-            appendMessage('尝试进行问答请求...', 'teacher');
-            postJson(u, payload).then(function(resp){
-              if (resp.error) {
-                appendMessage('请求异常: ' + (resp.error.message || resp.error), 'teacher');
-                return tryNext();
-              }
-              if (!resp.res.ok) {
-                var msg = (resp.parsed && (resp.parsed.error || resp.parsed.__rawText)) || resp.res.statusText;
-                appendMessage('响应错误: ' + msg, 'teacher');
-                return tryNext();
-              }
-              if (resp.parsed && resp.parsed.__rawText && looksLikeHtml(resp.parsed.__rawText)) {
-                appendMessage('收到 HTML 响应（可能为前端 dev server），响应体前200: ' + (resp.parsed.__rawText||'').slice(0,200), 'teacher');
-                return tryNext();
-              }
-              // 成功
-              var j = resp.parsed;
-              if (j.answer) {
-                appendMessage(j.answer, 'teacher');
-                apiNotice.textContent = '已连接';
-              } else if (j.error) {
-                appendMessage('问答出错: ' + j.error, 'teacher');
-              } else {
-                appendMessage('无回答', 'teacher');
-              }
-              askBtn.disabled = false;
-            }).catch(function(err){
-              appendMessage('请求失败: ' + (err.message || err), 'teacher');
-              return tryNext();
-            });
+            // 对单个 URL 做最多 2 次尝试（简单重试）
+            var attempts = 0;
+            (function tryUrlOnce(){
+              attempts += 1;
+              tried.push(u + ' (attempt ' + attempts + ')');
+              appendMessage('尝试问答 URL：' + u + ' （第 ' + attempts + ' 次）', 'teacher');
+              postJson(u, payload, 10000).then(function(resp){
+                if (resp.error) {
+                  appendMessage('请求异常：' + (resp.error.message || resp.error), 'teacher');
+                  if (attempts < 2) {
+                    // 小退避后重试同一 URL
+                    setTimeout(tryUrlOnce, 500 * attempts);
+                  } else {
+                    // 改试下一个 URL
+                    setTimeout(tryNext, 200);
+                  }
+                  return;
+                }
+                if (!resp.res.ok) {
+                  var msg = (resp.parsed && (resp.parsed.error || resp.parsed.__rawText)) || resp.res.statusText;
+                  appendMessage('响应错误（HTTP ' + resp.res.status + '）：' + msg, 'teacher');
+                  // 不在当前 URL 重试（除非想要），直接换下一个
+                  setTimeout(tryNext, 200);
+                  return;
+                }
+                if (resp.parsed && resp.parsed.__rawText && looksLikeHtml(resp.parsed.__rawText)) {
+                  appendMessage('收到 HTML 响应（可能为前端 dev server），响应体前200: ' + (resp.parsed.__rawText||'').slice(0,200), 'teacher');
+                  setTimeout(tryNext, 200);
+                  return;
+                }
+                // 成功：若当前 API_BASE 与尝试的 base 不同，则更新输入框以便后续请求使用
+                try {
+                  var baseOfU = u.replace(/\/api\/ai_teacher\/ask$/, '');
+                  if (baseOfU && baseOfU !== API_BASE) {
+                    API_BASE = baseOfU;
+                    apiBaseInput.value = API_BASE;
+                    try { localStorage.setItem('AI_TEACHER_API_BASE', API_BASE); } catch(e){}
+                    appendMessage('已将可用后端地址更新为：' + API_BASE, 'teacher');
+                  }
+                } catch(e){}
+
+                // 正常处理返回
+                var j = resp.parsed;
+                if (j && j.answer) {
+                  appendMessage(j.answer, 'teacher');
+                  apiNotice.textContent = '已连接';
+                } else if (j && j.error) {
+                  appendMessage('问答出错: ' + j.error, 'teacher');
+                } else {
+                  appendMessage('无回答', 'teacher');
+                }
+                askBtn.disabled = false;
+              }).catch(function(err){
+                appendMessage('请求失败：' + (err && err.message ? err.message : err), 'teacher');
+                if (attempts < 2) {
+                  setTimeout(tryUrlOnce, 500 * attempts);
+                } else {
+                  setTimeout(tryNext, 200);
+                }
+              });
+            })();
           })();
         }
 
@@ -310,17 +373,6 @@
         enterBtn.addEventListener('click', startLesson);
         nextBtn.addEventListener('click', showNext);
         askBtn.addEventListener('click', askQuestion);
-
-        // 新增：带超时的 fetch，防止长时间挂起
-        function fetchWithTimeout(url, opts, timeoutMs) {
-          timeoutMs = timeoutMs || 1500;
-          return Promise.race([
-            fetch(url, opts),
-            new Promise(function(_, reject){
-              setTimeout(function(){ reject(new Error('timeout')); }, timeoutMs);
-            })
-          ]);
-        }
 
         // 新增：在本机 host 上自动探测后端可用端口并设置 API_BASE
         async function discoverBackend(ports) {

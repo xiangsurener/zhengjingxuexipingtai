@@ -415,154 +415,167 @@ function _isLessonNNPage() {
 	}
 }
 
-// 替换：自动在页面右下角注入一个“朗读课程”浮动按钮（仅在 /lesson/nn 页面注入）
-// 新逻辑保持不变，但增加页面判断以避免在其它页面出现按钮
+// 替换：自动在页面右下角注入一个“朗读课程”浮动按钮，仅在 /lesson/nn 页面显示（带路由监听，离开即移除）
 (function _injectTTSButton(){
   try {
     if (typeof document === 'undefined') return;
-    // 仅在课程页面注入按钮
-    if (!_isLessonNNPage()) return;
-    if (document.getElementById('tts-play-button')) return;
 
-    // 全局播放器对象：存放 current Audio、段文本数组、当前索引、状态
-    window._aiTtsPlayer = window._aiTtsPlayer || { audio: null, segmentsText: [], index: 0, playing: false };
+    // 创建按钮（若不存在）并绑定事件
+    function ensureButton() {
+      if (!_isLessonNNPage()) return;
+      if (document.getElementById('tts-play-button')) return;
 
-    const btn = document.createElement('button');
-    btn.id = 'tts-play-button';
-    btn.textContent = '朗读课程';
-    Object.assign(btn.style, {
-      position: 'fixed',
-      right: '16px',
-      bottom: '16px',
-      zIndex: 9999,
-      padding: '10px 14px',
-      background: '#0b79d0',
-      color: '#fff',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-    });
-    btn.title = '朗读本课程（中英文混合）';
+      // 全局播放器对象
+      window._aiTtsPlayer = window._aiTtsPlayer || { audio: null, segmentsText: [], index: 0, playing: false };
 
-    // 把 day1Lesson 分段为若干可读文本（每个元素为一小节）
-    function _collectTranscriptSegments() {
-      const segments = [];
-      for (const seg of day1Lesson.segments || []) {
-        if (Array.isArray(seg.transcript)) {
-          const txt = seg.transcript.join(' ');
-          if (txt && txt.trim()) segments.push(txt.trim());
-        } else if (typeof seg.transcript === 'string') {
-          const txt = seg.transcript.trim();
-          if (txt) segments.push(txt);
+      const btn = document.createElement('button');
+      btn.id = 'tts-play-button';
+      btn.textContent = '朗读课程';
+      Object.assign(btn.style, {
+        position: 'fixed',
+        right: '16px',
+        bottom: '16px',
+        zIndex: 2147483647,
+        padding: '10px 14px',
+        background: '#0b79d0',
+        color: '#fff',
+        border: 'none',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+        pointerEvents: 'auto'
+      });
+      btn.title = '朗读本课程（中英文混合）';
+
+      // 收集分段（兜底；优先使用 setFocusSegment 等外部传入的 index）
+      function _collectTranscriptSegments() {
+        const segments = [];
+        for (const seg of day1Lesson.segments || []) {
+          if (Array.isArray(seg.transcript)) {
+            const txt = seg.transcript.join(' ');
+            if (txt && txt.trim()) segments.push(txt.trim());
+          } else if (typeof seg.transcript === 'string') {
+            const txt = seg.transcript.trim();
+            if (txt) segments.push(txt);
+          }
         }
+        return segments;
       }
-      return segments;
+
+      btn.addEventListener('click', async () => {
+        try {
+          const player = window._aiTtsPlayer;
+
+          // 初始化段数组：不覆盖已存在的 index（目录点击设焦点后能从该小节开始播）
+          if (!player.segmentsText || player.segmentsText.length === 0) {
+            player.segmentsText = _collectTranscriptSegments();
+            if (!Number.isInteger(player.index) || player.index < 0 || player.index >= player.segmentsText.length) {
+              player.index = 0;
+            }
+          }
+
+          // 正在播放 -> 暂停
+          if (player.audio && !player.audio.paused && !player.audio.ended) {
+            try { player.audio.pause(); } catch (e) {}
+            player.playing = false;
+            btn.textContent = '继续朗读';
+            return;
+          }
+
+          // 暂停未结束 -> 恢复
+          if (player.audio && player.audio.paused && !player.audio.ended) {
+            try {
+              await player.audio.play();
+              player.playing = true;
+              btn.textContent = '播放中...';
+            } catch (e) {
+              console.warn('resume failed, regenerating segment', e);
+              player.audio = null;
+            }
+            return;
+          }
+
+          // 播放当前焦点段
+          if (player.index >= (player.segmentsText || []).length) player.index = 0;
+          const segText = (player.segmentsText || [])[player.index];
+          if (!segText) {
+            alert('没有可朗读的段落。');
+            return;
+          }
+
+          btn.disabled = true;
+          btn.textContent = '生成语音中...';
+          const audio = await playTextTTS(segText, { autoplay: false });
+          btn.disabled = false;
+          if (!audio) { btn.textContent = '朗读课程'; return; }
+
+          player.audio = audio;
+          try { await audio.play(); } catch (e) {}
+          player.playing = true;
+          btn.textContent = '播放中...';
+
+          audio.onended = () => {
+            player.playing = false;
+            player.audio = null;
+            player.index = Math.min(player.index + 1, (player.segmentsText || []).length);
+            btn.textContent = player.index >= (player.segmentsText || []).length ? '朗读结束' : '继续朗读';
+          };
+          audio.onpause = () => { if (audio && !audio.ended) btn.textContent = '继续朗读'; };
+          audio.onplay = () => { btn.textContent = '播放中...'; };
+        } catch (err) {
+          console.error('TTS button error', err);
+          btn.disabled = false;
+          btn.textContent = '朗读课程';
+        }
+      });
+
+      document.body.appendChild(btn);
     }
 
-    // 清理播放资源
-    function _cleanupPlayer() {
+    // 移除按钮并停止音频（离开课程页时调用）
+    function removeButton() {
+      try {
+        const btn = document.getElementById('tts-play-button');
+        if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
+      } catch (e) {}
       try {
         const p = window._aiTtsPlayer;
         if (p && p.audio) {
           try { p.audio.pause(); } catch (e) {}
-          try { p.audio.src = ""; } catch (e) {}
+          try { p.audio.currentTime = 0; } catch (e) {}
+          try { p.audio.src = ''; } catch (e) {}
         }
+        if (p) { p.audio = null; p.playing = false; }
       } catch (e) {}
-      window._aiTtsPlayer.audio = null;
-      window._aiTtsPlayer.playing = false;
-      btn.disabled = false;
-      btn.textContent = '朗读课程';
     }
 
-    btn.addEventListener('click', async () => {
-      try {
-        const player = window._aiTtsPlayer;
-        // 如果没有已加载的段文本，初始化
-        if (!player.segmentsText || player.segmentsText.length === 0) {
-          player.segmentsText = _collectTranscriptSegments();
-          player.index = 0;
-        }
+    // 根据路由更新按钮显隐
+    function updateByRoute() {
+      if (_isLessonNNPage()) ensureButton();
+      else removeButton();
+    }
 
-        // 若当前有 audio 且正在播放 -> 暂停当前播放
-        if (player.audio && !player.audio.paused && !player.audio.ended) {
-          player.audio.pause();
-          player.playing = false;
-          btn.textContent = '继续朗读';
-          return;
-        }
+    // 初次执行一次
+    updateByRoute();
 
-        // 若当前有 audio 且是暂停状态（未结束） -> 恢复播放该段
-        if (player.audio && player.audio.paused && !player.audio.ended) {
-          try {
-            await player.audio.play();
-            player.playing = true;
-            btn.textContent = '播放中...';
-          } catch (e) {
-            // 恢复失败，重新生成并播放当前段
-            console.warn('resume failed, regenerating segment', e);
-            player.audio = null;
-          }
-          return;
-        }
-
-        // 若没有 audio（首次或上一段已结束），播放当前索引的段
-        if (player.index >= (player.segmentsText || []).length) {
-          // 播放完毕，重新从头开始
-          player.index = 0;
-        }
-
-        const segText = (player.segmentsText || [])[player.index];
-        if (!segText) {
-          alert('没有可朗读的段落。');
-          return;
-        }
-
-        btn.disabled = true;
-        btn.textContent = '生成语音中...';
-
-        // 生成当前段的 Audio（不自动播放），然后调用 play()
-        const audio = await playTextTTS(segText, { autoplay: false });
-        if (!audio) {
-          btn.disabled = false;
-          btn.textContent = '朗读课程';
-          return;
-        }
-
-        // 保存 audio 并播放
-        player.audio = audio;
-        try {
-          await audio.play();
-        } catch (e) {
-          console.warn('play failed after generation', e);
-        }
-        player.playing = true;
-        btn.disabled = false;
-        btn.textContent = '播放中...';
-
-        // 当段播放结束时：自动停（不连播），更新按钮为继续，并将索引指向下一段
-        audio.onended = () => {
-          player.playing = false;
-          player.audio = null; // 清掉已结束的 audio
-          // 增加索引到下一段，但不自动播放
-          player.index = Math.min(player.index + 1, (player.segmentsText || []).length);
-          btn.textContent = player.index >= (player.segmentsText || []).length ? '朗读结束' : '继续朗读';
-        };
-        audio.onpause = () => {
-          if (audio && !audio.ended) btn.textContent = '继续朗读';
-        };
-        audio.onplay = () => {
-          btn.textContent = '播放中...';
-        };
-      } catch (err) {
-        console.error('TTS button error', err);
-        btn.disabled = false;
-        btn.textContent = '朗读课程';
-      }
-    });
-
-    document.body.appendChild(btn);
-  } catch (e) { /* 安静失败，不影响页面其它功能 */ }
+    // 监听路由变化（hash、popstate、pushState/replaceState）
+    window.addEventListener('hashchange', updateByRoute);
+    window.addEventListener('popstate', updateByRoute);
+    try {
+      const _ps = history.pushState;
+      history.pushState = function() {
+        const ret = _ps && _ps.apply(this, arguments);
+        try { window.dispatchEvent(new Event('popstate')); } catch(e){}
+        return ret;
+      };
+      const _rs = history.replaceState;
+      history.replaceState = function() {
+        const ret = _rs && _rs.apply(this, arguments);
+        try { window.dispatchEvent(new Event('popstate')); } catch(e){}
+        return ret;
+      };
+    } catch (e) {}
+  } catch (e) { /* ignore */ }
 })();
 
 export function getTranscriptSegments() {

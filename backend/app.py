@@ -84,10 +84,14 @@ class LMService:
             # 按需初始化两个 LLM 实例（teacher 与 qa）
             self.teacher_llm = QwenTurboTongyi(temperature=0.7)
             self.qa_llm = QwenTurboTongyi(temperature=1)
-            # QA prompt template（保留现有字符串模板含义）
-            self.qa_template = '''
-                你的名字是AI教师,当有人问问题的时候,你都会回答{question}, 内容尽量详细
-            '''
+
+            # QA prompt template：移除要求“指出是否引用剧本”的说明，避免模型在回答中提及是否引用
+            self.qa_template = (
+                "你是课程中的 AI 教师，语气亲切、专业、适合课堂讲解。\n"
+                "请直接回答用户问题，回答应条理清晰，必要时给出步骤与示例。\n"
+                "请不要在回答中说明是否引用了课程剧本或其他来源。\n"
+                "问题：{question}"
+            )
             try:
                 self.qa_prompt = PromptTemplate(template=self.qa_template, input_variables=["question"])
                 # RunnableSequence 的组合在不同版本上行为不同，兼容处理
@@ -105,16 +109,53 @@ class LMService:
             self.qa_llm = None
             self.qa_chain = RunnableSequence()
 
+    def _format_paragraphs(self, text: str, max_sentences_per_para: int = 3) -> str:
+        """
+        规范化模型输出为段落，段落之间用单个空行分隔（即 '\n\n'）。
+        逻辑：
+         - 统一换行符为 LF 并去两端空白；
+         - 若文本已包含空行（两个及以上连续换行），按这些空行分段并去重多重空行；
+         - 否则按句子切分并每 max_sentences_per_para 句合并为一段；
+         - 最终用 '\n\n' 连接各段，确保段间只有一个空行。
+        """
+        if not text or not isinstance(text, str):
+            return text or ""
+
+        # 统一换行为 LF，剔除首尾空白
+        txt = text.replace('\r\n', '\n').replace('\r', '\n').strip()
+        if not txt:
+            return ""
+
+        # 若已经存在空行（两个或更多连续换行符），按空行分段并规范化（去掉多重空行）
+        if '\n\n' in txt:
+            parts = re.split(r'\n{2,}', txt)
+            parts = [p.strip() for p in parts if p.strip()]
+            return '\n\n'.join(parts)
+
+        # 否则按句子边界切分（中文句号/感叹/问号及英文 .!?），再按句数合并为段
+        parts = re.split(r'(?<=[。！？\.\!\?])\s*', txt)
+        parts = [p.strip() for p in parts if p.strip()]
+        if not parts:
+            return txt
+
+        paras = []
+        for i in range(0, len(parts), max_sentences_per_para):
+            para = "".join(parts[i:i+max_sentences_per_para])
+            paras.append(para)
+
+        return '\n\n'.join([p.strip() for p in paras if p.strip()])
+
     def run_qa(self, question: str, chat_history=None, script_context=None):
         """统一调用 QA 链并返回字符串，内部兼容 invoke 或直接调用。
         chat_history: list of {"role","text"} 最近对话
         script_context: list of strings（与问题相关的剧本段落）
         """
         if not self.available:
-            return "（本地未配置LLM，无法生成真实回答）"
+            # 占位回答也走后处理以保证格式一致
+            return self._format_paragraphs("（本地未配置LLM，无法生成真实回答）")
         # 构造 prompt：系统指令（教师身份） + 剧本上下文 + 聊天历史 + 本次问题
         system_inst = ("你是课程中的 AI 教师，语气亲切、专业、适合课堂讲解。回答应参考课程剧本上下文，"
-                       "并指出若有引用剧本文本需明确标注。回答需要清晰、分步并适度举例。")
+                       "回答需要清晰、分步并适度举例。请不要在回答中说明是否引用了课程剧本或其他来源。")
         parts = [system_inst]
         if script_context:
             parts.append("以下为与问题相关的课程剧本片段（仅作参考）：")
@@ -134,9 +175,14 @@ class LMService:
                 resp = self.qa_chain.invoke({"question": prompt_input})
             else:
                 resp = self.qa_chain({"question": prompt_input})
-            return str(resp)
+            answer = str(resp)
+            # 后处理：确保分段友好且段间用单个空行
+            return self._format_paragraphs(answer)
         except Exception as e:
-            return f"回答生成出错：{e}"
+            # 若模型调用失败，返回错误信息并格式化
+            err_text = f"回答生成出错：{e}"
+            return self._format_paragraphs(err_text)
+
 # ===== end LMService =====
 
 # AI 教师实现（简化自 test.py）
@@ -446,6 +492,17 @@ def api_ask():
 
         # 调用 LMService（会合并系统 prompt + script_ctx + chat_hist + question）
         answer = teacher.lm.run_qa(question, chat_history=chat_hist, script_context=script_ctx)
+        # 二次后处理：确保段落间仅一个空行，并移除可能指出“引用/来源/参考”等说明
+        try:
+            if hasattr(teacher.lm, "_format_paragraphs"):
+                answer = teacher.lm._format_paragraphs(answer)
+        except Exception:
+            pass
+        # 删除以“引用/来源/参考”开头的行（兼容中英文冒号），避免显式说明是否引用剧本
+        try:
+            answer = re.sub(r'(?im)^[ \t]*(引用|来源|参考)[：:]?.*(\r?\n)?', '', answer).strip()
+        except Exception:
+            pass
 
         # 记录助手回答
         append_memory(client_id, "assistant", answer)
