@@ -274,3 +274,430 @@ export const day1Lesson = {
     }
   ]
 }
+
+// 新增：自动探测可用后端基地址并缓存
+async function _probeUrl(url, timeout = 2000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const res = await fetch(url, { method: 'GET', signal: controller.signal, mode: 'cors' });
+    clearTimeout(timer);
+    return res && (res.ok || res.status === 200 || res.status === 404); // 404 说明到了该主机但路径不存在（可认为可达）
+  } catch (e) {
+    return false;
+  }
+}
+
+async function findWorkingBackend() {
+  // 优先使用缓存的可用地址，缓存键名
+  const cacheKey = 'tts_backend_base_working';
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) return cached;
+
+  if (typeof window === 'undefined') return null;
+  const hostname = window.location.hostname || 'localhost';
+  // 常见端口，包含你提到的 8080
+  const ports = [5000, 5001, 5002, 8000, 8080, 5010];
+  const variants = [];
+
+  // 构造候选（优先 localhost/127.0.0.1，再 hostname）
+  for (const p of ports) {
+    variants.push(`http://localhost:${p}`);
+    variants.push(`http://127.0.0.1:${p}`);
+    variants.push(`http://${hostname}:${p}`);
+  }
+  // 最后尝试相对路径（适用于已配置 proxy 或同域）
+  variants.push("");
+
+  for (const base of variants) {
+    try {
+      // 测试两个常用探测路径：/__status 优先，否则 /api/health
+      if (base === "") {
+        // 相对路径检测
+        if (await _probeUrl('/__status') || await _probeUrl('/api/health')) {
+          localStorage.setItem(cacheKey, "");
+          return "";
+        }
+      } else {
+        const statusUrl = (base.replace(/\/$/,"")) + '/__status';
+        const healthUrl = (base.replace(/\/$/,"")) + '/api/health';
+        if (await _probeUrl(statusUrl) || await _probeUrl(healthUrl)) {
+          localStorage.setItem(cacheKey, base);
+          return base;
+        }
+      }
+    } catch (e) {
+      // 忽略，尝试下一个
+      continue;
+    }
+  }
+  return null;
+}
+
+// 更新：调用后端 TTS 并返回 Audio 对象（不一定立即播放）
+// 现在支持 opts.autoplay (默认 true)；若 autoplay=false 则只构建 Audio 返回，不调用 play()
+export async function playTextTTS(text, opts = {}) {
+  if (!text) return null;
+  const timeoutMs = opts.timeoutMs || 15000;
+  const autoplay = opts.autoplay !== undefined ? !!opts.autoplay : true;
+
+  const base = await findWorkingBackend();
+  if (base === null) {
+    alert('无法找到可用的后端 TTS 服务。请确认后端已启动并监听常见端口（如 5000/8080 等）。');
+    return null;
+  }
+
+  const baseUrl = (base === "" ? "" : base.replace(/\/$/,""));
+  const url = (baseUrl || "") + "/api/ai_teacher/tts";
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      localStorage.removeItem('tts_backend_base_working');
+      const errJson = await res.json().catch(()=>({}));
+      console.error('TTS HTTP error', res.status, errJson);
+      alert('后端 TTS 服务返回错误，请查看后端日志。');
+      return null;
+    }
+
+    const j = await res.json().catch(()=>({}));
+    if (!j || !j.url) {
+      localStorage.removeItem('tts_backend_base_working');
+      alert('后端未返回音频 URL。');
+      return null;
+    }
+
+    // 将相对路径转为绝对 URL（如果返回的是相对路径）
+    let audioUrl = j.url;
+    if (audioUrl.startsWith("/")) {
+      const hostBase = baseUrl || window.location.origin;
+      audioUrl = hostBase.replace(/\/$/,"") + audioUrl;
+    } else if (!/^https?:\/\//i.test(audioUrl)) {
+      const hostBase = baseUrl || window.location.origin;
+      audioUrl = hostBase.replace(/\/$/,"") + "/" + audioUrl.replace(/^\//,"");
+    }
+
+    const audio = new Audio(audioUrl);
+    audio.crossOrigin = 'anonymous';
+    if (autoplay) {
+      await audio.play().catch(()=>{ /* 用户手势限制可能阻止自动播放 */ });
+    }
+    return audio;
+  } catch (e) {
+    console.error('playTextTTS error', e);
+    localStorage.removeItem('tts_backend_base_working');
+    alert('请求后端 TTS 失败，请确认后端已启动并可通过网络访问。');
+    return null;
+  }
+}
+
+// 新增：判断当前是否在课程页 /lesson/nn（支持 pathname 与 hash）
+function _isLessonNNPage() {
+	try {
+		if (typeof window === 'undefined') return false;
+		const p = (window.location && window.location.pathname) ? window.location.pathname : '';
+		const h = (window.location && window.location.hash) ? window.location.hash : '';
+		// 支持 /lesson/nn 或 /lesson/nn/xxx，也支持 hash 模式 #/lesson/nn
+		if (/\/lesson\/nn(?:\/|$)/.test(p)) return true;
+		if (/#\/?lesson\/nn(?:\/|$)/.test(h)) return true;
+		return false;
+	} catch (e) {
+		return false;
+	}
+}
+
+// 替换：自动在页面右下角注入一个“朗读课程”浮动按钮（仅在 /lesson/nn 页面注入）
+// 新逻辑保持不变，但增加页面判断以避免在其它页面出现按钮
+(function _injectTTSButton(){
+  try {
+    if (typeof document === 'undefined') return;
+    // 仅在课程页面注入按钮
+    if (!_isLessonNNPage()) return;
+    if (document.getElementById('tts-play-button')) return;
+
+    // 全局播放器对象：存放 current Audio、段文本数组、当前索引、状态
+    window._aiTtsPlayer = window._aiTtsPlayer || { audio: null, segmentsText: [], index: 0, playing: false };
+
+    const btn = document.createElement('button');
+    btn.id = 'tts-play-button';
+    btn.textContent = '朗读课程';
+    Object.assign(btn.style, {
+      position: 'fixed',
+      right: '16px',
+      bottom: '16px',
+      zIndex: 9999,
+      padding: '10px 14px',
+      background: '#0b79d0',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+    });
+    btn.title = '朗读本课程（中英文混合）';
+
+    // 把 day1Lesson 分段为若干可读文本（每个元素为一小节）
+    function _collectTranscriptSegments() {
+      const segments = [];
+      for (const seg of day1Lesson.segments || []) {
+        if (Array.isArray(seg.transcript)) {
+          const txt = seg.transcript.join(' ');
+          if (txt && txt.trim()) segments.push(txt.trim());
+        } else if (typeof seg.transcript === 'string') {
+          const txt = seg.transcript.trim();
+          if (txt) segments.push(txt);
+        }
+      }
+      return segments;
+    }
+
+    // 清理播放资源
+    function _cleanupPlayer() {
+      try {
+        const p = window._aiTtsPlayer;
+        if (p && p.audio) {
+          try { p.audio.pause(); } catch (e) {}
+          try { p.audio.src = ""; } catch (e) {}
+        }
+      } catch (e) {}
+      window._aiTtsPlayer.audio = null;
+      window._aiTtsPlayer.playing = false;
+      btn.disabled = false;
+      btn.textContent = '朗读课程';
+    }
+
+    btn.addEventListener('click', async () => {
+      try {
+        const player = window._aiTtsPlayer;
+        // 如果没有已加载的段文本，初始化
+        if (!player.segmentsText || player.segmentsText.length === 0) {
+          player.segmentsText = _collectTranscriptSegments();
+          player.index = 0;
+        }
+
+        // 若当前有 audio 且正在播放 -> 暂停当前播放
+        if (player.audio && !player.audio.paused && !player.audio.ended) {
+          player.audio.pause();
+          player.playing = false;
+          btn.textContent = '继续朗读';
+          return;
+        }
+
+        // 若当前有 audio 且是暂停状态（未结束） -> 恢复播放该段
+        if (player.audio && player.audio.paused && !player.audio.ended) {
+          try {
+            await player.audio.play();
+            player.playing = true;
+            btn.textContent = '播放中...';
+          } catch (e) {
+            // 恢复失败，重新生成并播放当前段
+            console.warn('resume failed, regenerating segment', e);
+            player.audio = null;
+          }
+          return;
+        }
+
+        // 若没有 audio（首次或上一段已结束），播放当前索引的段
+        if (player.index >= (player.segmentsText || []).length) {
+          // 播放完毕，重新从头开始
+          player.index = 0;
+        }
+
+        const segText = (player.segmentsText || [])[player.index];
+        if (!segText) {
+          alert('没有可朗读的段落。');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '生成语音中...';
+
+        // 生成当前段的 Audio（不自动播放），然后调用 play()
+        const audio = await playTextTTS(segText, { autoplay: false });
+        if (!audio) {
+          btn.disabled = false;
+          btn.textContent = '朗读课程';
+          return;
+        }
+
+        // 保存 audio 并播放
+        player.audio = audio;
+        try {
+          await audio.play();
+        } catch (e) {
+          console.warn('play failed after generation', e);
+        }
+        player.playing = true;
+        btn.disabled = false;
+        btn.textContent = '播放中...';
+
+        // 当段播放结束时：自动停（不连播），更新按钮为继续，并将索引指向下一段
+        audio.onended = () => {
+          player.playing = false;
+          player.audio = null; // 清掉已结束的 audio
+          // 增加索引到下一段，但不自动播放
+          player.index = Math.min(player.index + 1, (player.segmentsText || []).length);
+          btn.textContent = player.index >= (player.segmentsText || []).length ? '朗读结束' : '继续朗读';
+        };
+        audio.onpause = () => {
+          if (audio && !audio.ended) btn.textContent = '继续朗读';
+        };
+        audio.onplay = () => {
+          btn.textContent = '播放中...';
+        };
+      } catch (err) {
+        console.error('TTS button error', err);
+        btn.disabled = false;
+        btn.textContent = '朗读课程';
+      }
+    });
+
+    document.body.appendChild(btn);
+  } catch (e) { /* 安静失败，不影响页面其它功能 */ }
+})();
+
+export function getTranscriptSegments() {
+	// ...existing code...
+}
+
+// 新增：设置焦点段（仅停止当前播放并记录索引，不自动播放）
+export function setFocusSegment(index) {
+  const segments = getTranscriptSegments();
+  if (!Array.isArray(segments) || index < 0 || index >= segments.length) return null;
+  // 停止当前播放但不触发播放
+  stopCurrentTTS();
+  window._aiTtsPlayer = window._aiTtsPlayer || { audio: null, segmentsText: [], index: 0, playing: false };
+  window._aiTtsPlayer.segmentsText = segments;
+  window._aiTtsPlayer.index = index;
+  window._aiTtsPlayer.playing = false;
+  // 更新按钮文本（若存在）
+  const btn = document.getElementById('tts-play-button');
+  if (btn) btn.textContent = '继续朗读';
+  return true;
+}
+
+export function setFocusSegmentById(id) {
+  if (!id) return null;
+  const idx = _findSegmentIndexById(id);
+  if (idx === -1) return null;
+  // 尝试滚动到对应内容区域（按 data-seg-index 或 id 匹配）
+  try {
+    const elByIndex = document.querySelector(`[data-seg-index="${idx}"]`);
+    const elById = document.querySelector(`#${CSS.escape(id)}`);
+    const target = elByIndex || elById;
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  } catch (e) { /* ignore */ }
+  return setFocusSegment(idx);
+}
+
+// 修改：bindOutlineClicks 不再直接播放，而是设置焦点并停止当前播放（并滚动到对应位置）
+export function bindOutlineClicks(rootSelector) {
+  // ...existing code to find root...
+  // 在事件处理里替换 playSegment(...) 调用为 setFocusSegment(...)
+  // 下面为完整替换事件回调实现：
+  const candidates = rootSelector ? [rootSelector] : ['#course-outline', '.course-outline', '.outline', '.toc', '#toc', '.sidebar-toc'];
+  let root = null;
+  for (const sel of candidates) {
+    try {
+      if (!sel) continue;
+      const el = document.querySelector(sel);
+      if (el) { root = el; break; }
+    } catch (e) { continue; }
+  }
+  if (!root) root = document.body;
+  if (root._ttsOutlineBound) return;
+  root._ttsOutlineBound = true;
+
+  root.addEventListener('click', (ev) => {
+    try {
+      let el = ev.target;
+      while (el && el !== root && el !== document) {
+        if (el.hasAttribute && (el.hasAttribute('data-seg-index') || el.hasAttribute('data-seg-id'))) break;
+        const cls = el.className || '';
+        if (typeof cls === 'string' && (cls.split(/\s+/).includes('segment-tag') || cls.split(/\s+/).includes('outline-item'))) break;
+        el = el.parentElement;
+      }
+      if (!el || el === root || el === document) return;
+
+      // 优先 data-seg-index：只设置焦点并停止播放，不自动播放
+      if (el.hasAttribute && el.hasAttribute('data-seg-index')) {
+        const idx = parseInt(el.getAttribute('data-seg-index'), 10);
+        if (!Number.isNaN(idx)) {
+          ev.preventDefault();
+          setFocusSegment(idx);
+          // 尝试滚动到主内容区域，如果对应内容有 data-seg-index 属性
+          try {
+            const contentEl = document.querySelector(`[data-seg-index="${idx}"]`);
+            if (contentEl && typeof contentEl.scrollIntoView === 'function') contentEl.scrollIntoView({behavior:'smooth', block:'center'});
+          } catch (e) {}
+          return;
+        }
+      }
+
+      if (el.hasAttribute && el.hasAttribute('data-seg-id')) {
+        const id = el.getAttribute('data-seg-id');
+        if (id) {
+          ev.preventDefault();
+          setFocusSegmentById(id);
+          try {
+            const contentEl = document.querySelector(`#${CSS.escape(id)}`) || document.querySelector(`[data-seg-id="${CSS.escape(id)}"]`);
+            if (contentEl && typeof contentEl.scrollIntoView === 'function') contentEl.scrollIntoView({behavior:'smooth', block:'center'});
+          } catch (e) {}
+          return;
+        }
+      }
+
+      // 类名匹配的备用逻辑：读取 data-index/data-id 或尝试解析 text
+      if (el.className && (el.className.split(/\s+/).includes('segment-tag') || el.className.split(/\s+/).includes('outline-item'))) {
+        if (el.dataset && el.dataset.index) {
+          const idx = parseInt(el.dataset.index, 10);
+          if (!Number.isNaN(idx)) { ev.preventDefault(); setFocusSegment(idx); return; }
+        }
+        if (el.dataset && el.dataset.id) {
+          ev.preventDefault(); setFocusSegmentById(el.dataset.id); return;
+        }
+      }
+    } catch (e) {
+      console.error('bindOutlineClicks handler error', e);
+    }
+  }, false);
+}
+
+// 自动绑定保持原样（MutationObserver 等无需修改）
+(function _autoBindOutline() {
+  try {
+    if (typeof document === 'undefined') return;
+    // 仅在课程页执行绑定逻辑
+    if (!_isLessonNNPage()) return;
+
+    // 尝试立即绑定
+    bindOutlineClicks();
+    // 观察 body，若有新节点可能为目录时再绑定（轻量观察）
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (!m.addedNodes) continue;
+        for (const n of m.addedNodes) {
+          if (!(n instanceof Element)) continue;
+          if (n.querySelector && (n.querySelector('[data-seg-index]') || n.querySelector('[data-seg-id]') || n.querySelector('.segment-tag') || n.querySelector('.outline-item'))) {
+            bindOutlineClicks();
+            return;
+          }
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  } catch (e) {
+    console.error('autoBindOutline error', e);
+  }
+})();
