@@ -2,11 +2,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { day1Lesson } from '../data/day1'
+import { day2Lesson } from '../data/day2'
 import { useAuth } from '../hooks/useAuth'
 import FloatingAiTutorLink from '../components/FloatingAiTutorLink'
 
 const lessons = {
-  nn: day1Lesson
+  nn: day1Lesson,
+  dl: day2Lesson
 }
 
 const QUIZ_STORAGE_PREFIX = 'lp.lesson.quizState.'
@@ -23,8 +25,10 @@ export default function Lesson() {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
   const { user } = useAuth()
   const totalSegments = lesson?.segments.length ?? 0
-  const quizStorageKey = lesson ? `${QUIZ_STORAGE_PREFIX}${lesson.id}` : null
-  const lockStorageKey = lesson ? `${QUIZ_LOCK_PREFIX}${lesson.id}` : null
+  // 将本地存储键与用户绑定，避免不同账号互相影响本地锁定/回答记录
+  const userKeyPart = user ? (user.id || user.email || user.username || String(user)) : 'guest'
+  const quizStorageKey = lesson ? `${QUIZ_STORAGE_PREFIX}${userKeyPart}.${lesson.id}` : null
+  const lockStorageKey = lesson ? `${QUIZ_LOCK_PREFIX}${userKeyPart}.${lesson.id}` : null
 
   useEffect(() => {
     setCurrentIndex(0)

@@ -1,17 +1,21 @@
 from flask import Blueprint, g, jsonify
 from models import LessonProgress, AssignmentScore
 from utils.auth import require_auth
+
 bp = Blueprint("report", __name__)
+
+# 课程元数据：title、segments、assignment（若有）
 LESSON_META = {
     "nn": {"title": "神经网络入门", "segments": 15, "assignment": "nn"},
-    "lr": {"title": "线性回归基础", "segments": 8, "assignment": None},
+    "dl": {"title": "深度学习进阶", "segments": 25, "assignment": "dl"},  # 新增 dl
 }
+
 @bp.get("/summary")
 @require_auth
 def summary():
     """
     与前端 /api/report/summary 对齐
-    res: { scoresByLesson, totalXp, avgAccuracy }
+    res: { scoresByLesson, totalXp, avgAccuracy, overallScore, totalTestScore, totalAssignmentScore }
     """
     session = g.db
     progresses = session.query(LessonProgress).filter_by(user_id=g.current_user.id).all()
@@ -22,7 +26,6 @@ def summary():
         .filter_by(user_id=g.current_user.id)
         .all()
     )
-
     assignment_score_map = {score.assignment_id: score for score in assignment_scores}
 
     scores = {}
@@ -30,7 +33,6 @@ def summary():
     ratios = []
     total_test_points = 0
     total_assignment_points = 0
-
     tracked_lessons = set()
 
     for lesson_id, meta in LESSON_META.items():
@@ -63,7 +65,7 @@ def summary():
             "totalScore": total_score,
         }
 
-    # Include any progress记录 that不在 metadata 中
+    # Include any progress records not listed in LESSON_META
     for prog in progresses:
         if prog.lesson_id in tracked_lessons:
             continue

@@ -1,10 +1,13 @@
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../hooks/useAuth'
 import { api } from '../services/api'
 import { day1Lesson } from '../data/day1'
+import { day2Lesson } from '../data/day2'
 
 const lessons = {
-  nn: day1Lesson
+  nn: day1Lesson,
+  dl: day2Lesson
 }
 
 const SCORE_PER_QUIZ = 10
@@ -14,13 +17,16 @@ const QUIZ_LOCK_PREFIX = 'lp.lesson.quizLocked.'
 export default function CourseSummary() {
   const { id } = useParams()
   const location = useLocation()
+  const { user } = useAuth()
   const lesson = lessons[id]
   const [progress, setProgress] = useState(null)
   const [loadingProgress, setLoadingProgress] = useState(false)
   const [quizState, setQuizState] = useState(location.state?.quizState ?? {})
   const [answersLocked, setAnswersLocked] = useState(() => Boolean(location.state?.answersLocked))
-  const quizStorageKey = lesson ? `${QUIZ_STORAGE_PREFIX}${lesson.id}` : null
-  const lockStorageKey = lesson ? `${QUIZ_LOCK_PREFIX}${lesson.id}` : null
+  // 将本地存储键与当前用户绑定，避免不同账号互相影响
+  const userKeyPart = user ? (user.id || user.email || user.username || String(user)) : 'guest'
+  const quizStorageKey = lesson ? `${QUIZ_STORAGE_PREFIX}${userKeyPart}.${lesson.id}` : null
+  const lockStorageKey = lesson ? `${QUIZ_LOCK_PREFIX}${userKeyPart}.${lesson.id}` : null
 
   useEffect(() => {
     if (!quizStorageKey) return

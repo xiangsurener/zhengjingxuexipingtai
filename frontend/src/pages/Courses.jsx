@@ -3,13 +3,14 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../services/api'
 import { day1Lesson } from '../data/day1'
+import { day2Lesson } from '../data/day2'
 
 export default function Courses() {
   const { user, requireAuth } = useAuth()
   const [progressMap, setProgressMap] = useState({})
   const courses = useMemo(() => ([
     { id: 'nn', title: '神经网络入门', segments: day1Lesson.segments.length },
-    { id: 'lr', title: '线性回归基础', segments: 8 }
+    { id: 'dl', title: '深度学习基础', segments: day2Lesson.segments.length }
   ]), [])
 
   useEffect(() => {

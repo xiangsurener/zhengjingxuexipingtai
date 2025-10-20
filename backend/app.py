@@ -318,6 +318,71 @@ def create_app():
         finally:
             session.close()
 
+    # 新增：拦截 /api/assignment/grade POST 请求，优先支持 assignmentId == 'dl'
+    @app.before_request
+    def intercept_assignment_grade():
+        try:
+            # 只处理精确路径（避免误拦截其他路由）
+            if request.path != "/api/assignment/grade" or request.method.upper() != "POST":
+                return None
+
+            # 解析 JSON（容错）
+            data = request.get_json(force=True, silent=True) or {}
+            assignment_id = (data.get("assignmentId") or "").strip()
+            code = data.get("code", "") or ""
+
+            # 仅接管 dl 作业的快速处理，其他 assignment 继续交由原路由处理
+            if assignment_id != "dl":
+                return None
+
+            # 基础检查：是否提交了代码
+            if not code or not isinstance(code, str) or len(code.strip()) < 10:
+                return jsonify({"error": "提交代码不能为空或长度过短"}), 400
+
+            # 合规检查：发现禁止导入的模块（简单静态检查）
+            banned = []
+            bad_patterns = [r'\\bsubprocess\\b', r'\\bsocket\\b', r'\\brequests\\b', r'\\burllib\\b', r'\\bos\\.system\\b']
+            for p in bad_patterns:
+                if re.search(p, code):
+                    banned.append(p)
+
+            # 评分规则（临时快速实现）
+            run_score = 20  # 只要能提交代码，先给“可运行”满分（后端实际运行评估可后续补充）
+            compliance_score = 0 if banned else 10
+            effect_score = 0  # 隐藏集/效果暂不在线评估（需独立沙箱运行）
+            total_score = run_score + compliance_score + effect_score
+
+            messages = []
+            if banned:
+                messages.append("检测到潜在的禁止库或函数，安全合规项计 0 分： " + ", ".join([p for p in banned]))
+            else:
+                messages.append("未检测到明显违规导入，安全合规得分已给出。")
+            messages.append("提示：后端目前未在此接口执行完整的模型训练/评估，仅完成基础合规检查与接收。若需要完整自动评分，请联系管理员开启沙箱执行或等待后端完成评分插件接入。")
+
+            # 返回统一格式（与前端期望的评分格式兼容）
+            result = {
+                "mode": "quick-dl",
+                "totalScore": total_score,
+                "scores": {
+                    "run": run_score,
+                    "compliance": compliance_score,
+                    "effect": effect_score
+                },
+                "metrics": {},
+                "messages": messages,
+                "logs": {"stdout": "", "stderr": ""}
+            }
+
+            # 注意：此处未写入 AssignmentScore 数据库。若需要持久化到用户成绩表，可在此处用 g.db 添加/更新记录（需根据 models.AssignmentScore 的字段实现）。
+            resp = jsonify(result)
+            resp.status_code = 200
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        except Exception as e:
+            print("ERROR intercepting dl assignment grade:", e)
+            traceback.print_exc()
+            return jsonify({"error": "internal server error"}), 500
+
     # 蓝图注册并加上统一前缀 /api
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(lesson_bp, url_prefix="/api/lesson")
@@ -803,60 +868,67 @@ def api_tts():
     out_path = os.path.join(TTS_DIR, fname)
 
     try:
-        # 初始化 pyttsx3 引擎（Windows 下默认使用 sapi5）
-        engine = pyttsx3.init(driverName='sapi5') if 'sapi5' in (pyttsx3.__dict__.get('__name__','') or '') or True else pyttsx3.init()
-        # 尝试选择女性语音（常见名含 'female' / 'Zira' 等）
+        # 稳健初始化 pyttsx3 引擎（使用默认驱动）；避免单行复杂表达式导致语法错误
+        try:
+            engine = pyttsx3.init()
+        except Exception:
+            # 若首次初始化异常，重试一次以便获取更明确的错误信息或成功初始化
+            engine = pyttsx3.init()
+
+        # 尝试选择中文语音（优先环境变量指定，其次按语音名/id/languages 匹配中文关键词）
         try:
             voices = engine.getProperty("voices") or []
             chosen = None
-            # 优先使用环境变量指定的语音（部分匹配）
             env_voice = os.environ.get("TTS_VOICE", "").strip().lower()
             if env_voice:
                 for v in voices:
                     try:
-                        vid = (v.id or "").lower()
-                        vname = (v.name or "").lower()
+                        vid = (getattr(v, 'id', '') or '').lower()
+                        vname = (getattr(v, 'name', '') or '').lower()
                         if env_voice in vid or env_voice in vname:
-                            chosen = v.id
+                            chosen = getattr(v, 'id', None)
                             break
                     except Exception:
                         continue
 
-            # 中文优先：检查 languages / name / id 中是否包含中文或常见中文语音关键词
             if not chosen:
                 zh_keywords = ["zh", "chinese", "mandarin", "普通话", "中文", "zh-cn", "xiaoyan", "xiaoyu", "huihui", "yaoyao", "lihui", "xiaole", "微软", "microsoft"]
                 for v in voices:
                     try:
-                        # languages 有时为 bytes 列表
                         langs = ""
                         try:
                             langs = " ".join([ (l.decode() if isinstance(l, (bytes, bytearray)) else str(l)) for l in (getattr(v, "languages", []) or []) ])
                         except Exception:
                             langs = ""
-                        name = (v.name or "") + " " + (v.id or "") + " " + langs
-                        name_low = name.lower()
-                        if any(k in name_low for k in zh_keywords):
-                            chosen = v.id
+                        name_combined = ((getattr(v, "name", "") or "") + " " + (getattr(v, "id", "") or "") + " " + langs).lower()
+                        if any(k in name_combined for k in zh_keywords):
+                            chosen = getattr(v, 'id', None)
                             break
                     except Exception:
                         continue
 
-            # 若仍未找到中文语音，返回错误提示（避免使用英文语音）
             if not chosen:
-                print("ERROR: No Chinese TTS voice found. Available voices:", [getattr(v,'name',None) for v in voices])
+                # 若未找到中文语音，打印可用语音用于调试，并返回友好错误给前端
+                try:
+                    avail = [getattr(v, 'name', None) for v in voices]
+                    print("ERROR: No Chinese TTS voice found. Available voices:", avail)
+                except Exception:
+                    pass
                 return jsonify({"error": "未检测到中文 TTS 语音包。请在系统中安装中文 SAPI5 语音或通过环境变量 TTS_VOICE 指定语音标识。"}), 500
 
             engine.setProperty("voice", chosen)
         except Exception:
-             pass
-        # 可调整语速与音量
+            # 若语音选择失败，继续使用默认语音（尽量不阻塞 TTS 生成）
+            pass
+
+        # 可调整语速与音量（非关键失败不阻塞）
         try:
             engine.setProperty("rate", 150)
             engine.setProperty("volume", 1.0)
         except Exception:
             pass
 
-        # 保存为 wav 文件
+        # 保存为 wav 文件 并执行
         engine.save_to_file(text, out_path)
         engine.runAndWait()
     except Exception as e:

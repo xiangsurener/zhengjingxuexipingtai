@@ -406,7 +406,10 @@ function _isLessonNNPage() {
 		if (typeof window === 'undefined') return false;
 		const p = (window.location && window.location.pathname) ? window.location.pathname : '';
 		const h = (window.location && window.location.hash) ? window.location.hash : '';
-		// 支持 /lesson/nn 或 /lesson/nn/xxx，也支持 hash 模式 #/lesson/nn
+		// 明确排除 summary 页面：/lesson/nn/summary 或 hash 模式 #/lesson/nn/summary
+		const isSummaryPath = /\/lesson\/nn\/summary(?:\/|$)/.test(p) || /#\/?lesson\/nn\/summary(?:\/|$)/.test(h);
+		if (isSummaryPath) return false;
+		// 普通 /lesson/nn 路由匹配（不包含 summary）
 		if (/\/lesson\/nn(?:\/|$)/.test(p)) return true;
 		if (/#\/?lesson\/nn(?:\/|$)/.test(h)) return true;
 		return false;
