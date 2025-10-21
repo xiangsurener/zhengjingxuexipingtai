@@ -1,12 +1,12 @@
 export const day2Lesson = {
   id: 'dl',
-  title: '深度学习进阶',
+  title: '深度学习基础',
   estimatedDuration: '约45分钟',
   intro: '深入探讨深度神经网络的结构设计、训练策略与实战技巧，包含 CNN 实践与避免过拟合的方法。',
   segments: [
     {
       id: 'opening',
-      title: '开场 · 深度学习进阶引入',
+      title: '开场 · 深度学习基础引入',
       type: 'lecture',
       transcript: [
         '亲爱的同学们，欢迎再次走进深度学习这个充满无限可能的精彩世界！昨天，我们一同揭开了神经网络的神秘面纱，初步领略了它独特的魅力。今天我们将开启一段更为精彩绝伦的深度学习进阶之旅。',

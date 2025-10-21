@@ -5,9 +5,9 @@ from flask import Blueprint, request, jsonify, g
 from werkzeug.utils import secure_filename
 
 try:
-    from services.assignment_grader import grade_titanic_assignment
+    from services.assignment_grader import grade_titanic_assignment, grade_redwine_assignment
 except ImportError:  # pragma: no cover - fallback when running as package
-    from backend.services.assignment_grader import grade_titanic_assignment
+    from backend.services.assignment_grader import grade_titanic_assignment, grade_redwine_assignment
 
 from models import AssignmentScore
 from utils.auth import require_auth
@@ -69,8 +69,11 @@ def grade():
     if len(code) > 20000:
         return jsonify({"error": "代码过长，请控制在 20000 字符以内"}), 400
 
-    if assignment_id == "nn":
-        result = grade_titanic_assignment(code)
+    if assignment_id in ["nn", "dl"]:
+        if assignment_id == "nn":
+            result = grade_titanic_assignment(code)
+        elif assignment_id == "dl":
+            result = grade_redwine_assignment(code)
 
         session = g.db
         assignment_score = (

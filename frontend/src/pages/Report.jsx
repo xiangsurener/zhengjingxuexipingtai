@@ -24,7 +24,7 @@ export default function Report() {
     <div className="mx-auto max-w-3xl space-y-6">
       <header className="space-y-1">
         <h1 className="text-2xl font-bold text-slate-900">学习报告</h1>
-        <p className="text-sm text-slate-500">测试成绩（20 分）与作业成绩（80 分）相加，构成课程总分（100 分）。</p>
+        <p className="text-sm text-slate-500">学习进度（20 分）与作业成绩（80 分）相加，构成课程总分（100 分）。</p>
       </header>
 
       <section className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 space-y-3">
@@ -46,7 +46,7 @@ export default function Report() {
         </div>
         <div className="flex flex-wrap gap-4 text-sm text-slate-500">
           <span>
-            测试合计：{data.totalTestScore ?? 0}
+            学习进度合计：{data.totalTestScore ?? 0}
             {hasCourses ? ` / ${fullTestScore}` : ' / —'}
           </span>
           <span>
@@ -69,7 +69,7 @@ export default function Report() {
                 <span className="rounded-full bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-700">{score?.totalScore ?? 0} / 100</span>
               </div>
               <p className="text-sm text-slate-600">
-                测试成绩：<span className="font-medium text-slate-800">{score?.testScore ?? 0} / 20</span>
+                学习进度：<span className="font-medium text-slate-800">{score?.testScore ?? 0} / 20</span>
                 <span className="mx-2 text-slate-400">·</span>
                 作业成绩：<span className="font-medium text-slate-800">{score?.assignmentScore ?? 0} / 80</span>
               </p>

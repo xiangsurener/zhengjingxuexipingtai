@@ -18,8 +18,12 @@
     </style>
   </head>
   <body>
-    <h2>课程：神经网络入门</h2>
+    <h2 id="courseTitle">课程：神经网络入门</h2>
     <div id="controls">
+      <select id="fileSelect" style="margin-right:12px; padding:6px;">
+        <option value="DAY1.txt">Day1：神经网络入门</option>
+        <option value="DAY2.txt">Day2：深度学习基础</option>
+      </select>
       <button id="enterBtn">进入学习</button>
       <button id="nextBtn" disabled>下一步</button>
       <span id="status"></span>
@@ -66,6 +70,21 @@
         });
 
         var fileName = 'DAY1.txt';
+        var fileSelect = document.getElementById('fileSelect');
+        var courseTitle = document.getElementById('courseTitle');
+        if (fileSelect) {
+          fileSelect.addEventListener('change', function(){
+            fileName = fileSelect.value;
+            // 动态切换标题
+            if (courseTitle) {
+              if (fileName === 'DAY2.txt') {
+                courseTitle.textContent = '课程：深度学习基础';
+              } else {
+                courseTitle.textContent = '课程：神经网络入门';
+              }
+            }
+          });
+        }
         var currentIndex = -1;
         var totalSegments = 0;
         // client_id：持久化到 localStorage，用于会话记忆
@@ -376,8 +395,8 @@
 
         // 新增：在本机 host 上自动探测后端可用端口并设置 API_BASE
         async function discoverBackend(ports) {
-          ports = ports || [5000,5001,5002,5003,5004,5005,5006,5007,5008,5009,5010,8000,8080,3000];
-          var host = location.hostname || 'localhost';
+          ports = ports || Array.from({length:16},(_,i)=>5000+i); // 5000-5015
+          var host = '127.0.0.1';
           var proto = location.protocol || 'http:';
           appendMessage('正在自动检测后端可用端口...', 'teacher');
           for (var i = 0; i < ports.length; i++) {

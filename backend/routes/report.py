@@ -7,7 +7,7 @@ bp = Blueprint("report", __name__)
 # 课程元数据：title、segments、assignment（若有）
 LESSON_META = {
     "nn": {"title": "神经网络入门", "segments": 15, "assignment": "nn"},
-    "dl": {"title": "深度学习进阶", "segments": 25, "assignment": "dl"},  # 新增 dl
+    "dl": {"title": "深度学习基础", "segments": 19, "assignment": "dl"},  # 新增 dl
 }
 
 @bp.get("/summary")

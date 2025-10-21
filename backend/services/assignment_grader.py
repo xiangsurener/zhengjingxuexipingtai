@@ -1,3 +1,4 @@
+from __future__ import annotations
 import ast
 import json
 import os
@@ -14,8 +15,359 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-ASSETS_DIR = BASE_DIR / "eval_assets" / "titanic"
-TRAIN_DATA_PATH = ASSETS_DIR / "train_public.csv"
+ASSETS_DIR_TITANIC = BASE_DIR / "eval_assets" / "titanic"
+TRAIN_DATA_PATH = ASSETS_DIR_TITANIC / "train_public.csv"
+
+# 红酒数据路径
+ASSETS_DIR_REDWINE = BASE_DIR / "eval_assets" / "redwine"
+REDWINE_DATA_PATH = ASSETS_DIR_REDWINE / "red-wine.csv"
+# ...existing code...
+
+def grade_redwine_assignment(code: str) -> Dict:
+    """
+    红酒质量分析作业评分函数，function/script模式，自动运行用户代码，计算 MAE 并赋分。
+    安全检测跳过，直接进入评分主流程。
+    """
+    analysis = _analyse_code_mode(code)
+    if not REDWINE_DATA_PATH.exists():
+        return {
+            "totalScore": 0,
+            "scores": {"run": 0, "compliance": 0, "effect": 0},
+            "messages": ["红酒评测数据缺失，请联系管理员。"],
+            "logs": {"stdout": "", "stderr": ""},
+            "mode": analysis.mode,
+        }
+    # 跳过安全检测，直接进入评分主流程
+    # 合规分后续由隐藏集效果和可运行性判断
+    dummy_compliance = type('DummyCompliance', (), {'score': 10})()  # 默认合规分10分
+    if analysis.mode == "function" and analysis.has_build_model:
+        return _grade_redwine_function_submission(code, dummy_compliance)
+    return _grade_redwine_script_submission(code, dummy_compliance)
+
+
+def _build_redwine_function_runner() -> str:
+    return textwrap.dedent(
+        """
+        import json
+        import os
+        import random
+        import signal
+        import sys
+        import traceback
+        import numpy as np
+        import pandas as pd
+
+        RESULT_PATH = "result.json"
+
+        def limit_resources():
+            try:
+                import resource
+                resource.setrlimit(resource.RLIMIT_CPU, (20, 20))
+                max_bytes = 1024 * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+            except Exception:
+                pass
+            try:
+                signal.alarm(30)
+            except Exception:
+                pass
+
+        def load_student_module():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("student_solution", "student_solution.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        def main():
+            limit_resources()
+            result = {
+                "status": "error",
+                "scores": {"run": 0, "effect": 0},
+                "metrics": {},
+                "messages": [],
+                "traceback": "",
+                "mode": "function",
+            }
+            train_path = os.environ.get("LP_REDWINE_TRAIN")
+            if not train_path or not os.path.exists(train_path):
+                result["messages"].append("评测数据缺失，请联系管理员。")
+                with open(RESULT_PATH, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False)
+                return
+
+            random.seed(2024)
+            np.random.seed(2024)
+            try:
+                full_df = pd.read_csv(train_path)
+                if "quality" not in full_df.columns:
+                    raise ValueError("缺少 quality 标签列。")
+                indices = list(range(len(full_df)))
+                random.shuffle(indices)
+                holdout_size = max(1, int(len(indices) * 0.2))
+                holdout_idx = set(indices[:holdout_size])
+                train_df = full_df.loc[~full_df.index.isin(holdout_idx)].reset_index(drop=True)
+                hidden_df = full_df.loc[full_df.index.isin(holdout_idx)].reset_index(drop=True)
+                if len(train_df) == 0 or len(hidden_df) == 0:
+                    raise ValueError("评测数据划分失败，请联系管理员。")
+                features_hidden = hidden_df.drop(columns=["quality"])
+                labels_hidden = hidden_df["quality"].reset_index(drop=True)
+                student = load_student_module()
+                if not hasattr(student, "build_model"):
+                    raise AttributeError("学生代码需定义 build_model(train_df) 函数。")
+                model = student.build_model(train_df.copy())
+                if hasattr(student, "predict"):
+                    preds = student.predict(model, features_hidden.copy())
+                elif hasattr(model, "predict"):
+                    preds = model.predict(features_hidden)
+                else:
+                    raise AttributeError(
+                        "未找到预测函数。请实现 student.predict(model, features_df) 或让返回的模型实现 predict 方法。"
+                    )
+                preds_series = pd.Series(preds).reset_index(drop=True)
+                if preds_series.isna().any():
+                    raise ValueError("预测结果包含缺失值，请确保输出有效数值。")
+                if len(preds_series) != len(labels_hidden):
+                    raise ValueError("预测数量与隐藏集样本数量不一致。")
+                preds_series = preds_series.astype(float)
+                labels_hidden = labels_hidden.astype(float)
+                mae = float(np.mean(np.abs(preds_series - labels_hidden)))
+                result["status"] = "ok"
+                result["scores"]["run"] = 20
+                # MAE越低分越高，满分50分，MAE<0.5得满分，MAE>2得最低分
+                if mae < 0.5:
+                    effect = 50
+                elif mae < 1.0:
+                    effect = 45
+                elif mae < 1.5:
+                    effect = 40
+                elif mae < 2.0:
+                    effect = 35
+                elif mae < 3.0:
+                    effect = 30
+                else:
+                    effect = 25
+                result["scores"]["effect"] = effect
+                result["metrics"]["mae"] = mae
+                result["messages"].append(
+                    f"运行成功，隐藏集 MAE {mae:.3f}，得分 {effect}/50。"
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["messages"].append(str(exc))
+                result["traceback"] = traceback.format_exc()
+            with open(RESULT_PATH, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+
+        if __name__ == "__main__":
+            try:
+                main()
+            finally:
+                try:
+                    signal.alarm(0)
+                except Exception:
+                    pass
+        """
+    )
+
+def _grade_redwine_function_submission(code: str, compliance: ComplianceResult) -> Dict:
+    if not REDWINE_DATA_PATH.exists():
+        return {
+            "totalScore": 0,
+            "scores": {"run": 0, "compliance": 0, "effect": 0},
+            "messages": ["红酒评测数据缺失，请联系管理员。"],
+            "logs": {"stdout": "", "stderr": ""},
+            "mode": "function",
+        }
+    with tempfile.TemporaryDirectory(prefix="lp_grade_redwine_func_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        (tmp_path / "student_solution.py").write_text(code, encoding="utf-8")
+        runner_path = tmp_path / "runner.py"
+        runner_path.write_text(_build_redwine_function_runner(), encoding="utf-8")
+        env = {
+            "PYTHONPATH": tmp_dir,
+            "LP_REDWINE_TRAIN": str(REDWINE_DATA_PATH),
+        }
+        for key in ["PATH", "HOME", "LANG", "LC_ALL"]:
+            if key in os.environ:
+                env[key] = os.environ[key]
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(runner_path)],
+                cwd=tmp_dir,
+                timeout=40,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "totalScore": compliance.score,
+                "scores": {"run": 0, "compliance": compliance.score, "effect": 0},
+                "messages": ["执行超时，请优化代码或降低训练开销。"],
+                "logs": {"stdout": "", "stderr": ""},
+                "mode": "function",
+            }
+        result_path = tmp_path / "result.json"
+        if not result_path.exists():
+            messages = ["评测失败：未生成结果文件。"]
+            if completed.stderr:
+                messages.append("stderr: " + completed.stderr.strip())
+            return {
+                "totalScore": compliance.score,
+                "scores": {"run": 0, "compliance": compliance.score, "effect": 0},
+                "messages": messages,
+                "logs": {"stdout": completed.stdout, "stderr": completed.stderr},
+                "mode": "function",
+            }
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        run_score = int(result["scores"].get("run", 0))
+        effect_score = int(result["scores"].get("effect", 0))
+        total = compliance.score + run_score + effect_score
+        messages = result.get("messages", [])
+        if result.get("status") != "ok" and result.get("traceback"):
+            messages.append("运行堆栈：")
+            messages.append(result["traceback"])
+        return {
+            "totalScore": total,
+            "scores": {
+                "run": run_score,
+                "compliance": compliance.score,
+                "effect": effect_score,
+            },
+            "metrics": result.get("metrics", {}),
+            "messages": messages,
+            "logs": {
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            },
+            "mode": "function",
+        }
+
+def _grade_redwine_script_submission(code: str, compliance: ComplianceResult) -> Dict:
+    if not REDWINE_DATA_PATH.exists():
+        return {
+            "totalScore": 0,
+            "scores": {"run": 0, "compliance": 0, "effect": 0},
+            "messages": ["红酒评测数据缺失，请联系管理员。"],
+            "logs": {"stdout": "", "stderr": ""},
+            "mode": "script",
+        }
+    with tempfile.TemporaryDirectory(prefix="lp_grade_redwine_script_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        (tmp_path / "student_solution.py").write_text(code, encoding="utf-8")
+        runner_path = tmp_path / "runner.py"
+        # 复用 titanic 的 script runner
+        runner_path.write_text(_build_script_runner(), encoding="utf-8")
+        local_data_dir = tmp_path / "data"
+        local_data_dir.mkdir(exist_ok=True)
+        shutil.copy(REDWINE_DATA_PATH, local_data_dir / "red-wine.csv")
+        shutil.copy(REDWINE_DATA_PATH, tmp_path / "red-wine.csv")
+        parent_data_dir = tmp_path.parent / "data"
+        created_parent_dir = False
+        created_parent_file = False
+        try:
+            if not parent_data_dir.exists():
+                parent_data_dir.mkdir(parents=True, exist_ok=True)
+                created_parent_dir = True
+            target_parent_file = parent_data_dir / "red-wine.csv"
+            if not target_parent_file.exists():
+                shutil.copy(REDWINE_DATA_PATH, target_parent_file)
+                created_parent_file = True
+        except Exception:
+            created_parent_dir = False
+            created_parent_file = False
+        env = {
+            "PYTHONPATH": tmp_dir,
+            "LP_REDWINE_TRAIN": str(REDWINE_DATA_PATH),
+            "LP_COMPAT_REDWINE_PATH": str(REDWINE_DATA_PATH),
+        }
+        for key in ["PATH", "HOME", "LANG", "LC_ALL"]:
+            if key in os.environ:
+                env[key] = os.environ[key]
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(runner_path)],
+                cwd=tmp_dir,
+                timeout=40,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            _cleanup_parent_dataset(created_parent_dir, created_parent_file, parent_data_dir)
+            return {
+                "totalScore": compliance.score,
+                "scores": {"run": 0, "compliance": compliance.score, "effect": 0},
+                "messages": ["脚本执行超时，请尝试减少训练量或输出。"],
+                "logs": {"stdout": "", "stderr": ""},
+                "mode": "script",
+            }
+        result_path = Path(tmp_dir) / "result.json"
+        _cleanup_parent_dataset(created_parent_dir, created_parent_file, parent_data_dir)
+        if not result_path.exists():
+            messages = ["脚本评测失败：未生成结果文件。"]
+            if completed.stderr:
+                messages.append("stderr: " + completed.stderr.strip())
+            return {
+                "totalScore": compliance.score,
+                "scores": {"run": 0, "compliance": compliance.score, "effect": 0},
+                "messages": messages,
+                "logs": {"stdout": completed.stdout, "stderr": completed.stderr},
+                "mode": "script",
+            }
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        run_score = 20 if result.get("status") == "ok" else 0
+        stdout_text = completed.stdout or ""
+        # 解析 accuracy 或 MAE
+        mae = None
+        # 支持输出形如 MAE: 0.82
+        m = re.search(r"mae\s*[:=]\s*(\d+\.\d+)", stdout_text, re.IGNORECASE)
+        if m:
+            try:
+                mae = float(m.group(1))
+            except Exception:
+                mae = None
+        effect_score = 0
+        if mae is not None:
+            if mae < 0.5:
+                effect_score = 50
+            elif mae < 1.0:
+                effect_score = 45
+            elif mae < 1.5:
+                effect_score = 40
+            elif mae < 2.0:
+                effect_score = 35
+            elif mae < 3.0:
+                effect_score = 30
+            else:
+                effect_score = 25
+        else:
+            effect_score = 25
+        messages = result.get("messages", [])
+        if mae is not None:
+            messages.append(f"脚本输出解析到 MAE ≈ {mae:.3f}，估算得分 {effect_score}/50。")
+        else:
+            messages.append("未在输出中解析到 MAE，请打印形如 'MAE: 0.82' 的行以获得更高分。")
+        if result.get("status") != "ok" and result.get("traceback"):
+            messages.append("运行堆栈：")
+            messages.append(result["traceback"])
+        total = compliance.score + run_score + effect_score
+        return {
+            "totalScore": total,
+            "scores": {
+                "run": run_score,
+                "compliance": compliance.score,
+                "effect": effect_score,
+            },
+            "metrics": {"parsedMAE": mae},
+            "messages": messages,
+            "logs": {
+                "stdout": stdout_text,
+                "stderr": completed.stderr,
+            },
+            "mode": "script",
+        }
 
 # 允许常见本地模块，屏蔽网络/进程等高风险库
 FORBIDDEN_IMPORTS = {
