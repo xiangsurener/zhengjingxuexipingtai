@@ -45,7 +45,8 @@ export const day2Lesson = {
         '“深”指多层非线性变换用于抽象特征',
         '深度学习在图像、语音、NLP 等领域表现卓越'
       ],
-      mediaPlaceholder: '深度学习应用示例图'
+      mediaPlaceholder: '深度学习应用示例图',
+  image: '/images/placeholders/1-1.png'
     },
     {
       id: 'advantages',
@@ -61,7 +62,8 @@ export const day2Lesson = {
         '在海量数据上表现更好',
         '适合非结构化数据'
       ],
-      mediaPlaceholder: '传统 ML vs 深度学习 对比图'
+      mediaPlaceholder: '传统 ML vs 深度学习 对比图',
+  image: '/images/placeholders/1-2.png'
     },
     {
       id: 'overfitting-quiz',
@@ -89,7 +91,8 @@ export const day2Lesson = {
         '网络深度与宽度需与数据规模匹配',
         '设计需兼顾性能与计算成本'
       ],
-      mediaPlaceholder: '网络结构示意'
+      mediaPlaceholder: '网络结构示意',
+  image: '/images/placeholders/2-1.png'
     },
     {
       id: 'init-opt',
@@ -104,7 +107,8 @@ export const day2Lesson = {
         'Xavier/He 初始化帮助稳定训练',
         'Adam 等自适应优化器常用'
       ],
-      mediaPlaceholder: '初始化与优化对比图'
+      mediaPlaceholder: '初始化与优化对比图',
+  image: '/images/placeholders/2-2.png'
     },
     {
       id: 'xavier-quiz',
@@ -133,7 +137,8 @@ export const day2Lesson = {
         'Dropout 可减少对单一神经元的依赖',
         'BatchNorm 有助于稳定训练，配合其他方法使用效果更佳'
       ],
-      mediaPlaceholder: '过拟合示例图'
+      mediaPlaceholder: '过拟合示例图',
+  image: '/images/placeholders/2-3.png'
     },
     {
       id: 'cnn-intro',
@@ -147,7 +152,8 @@ export const day2Lesson = {
         '卷积层自动提取局部特征',
         '池化层降低维度、减少计算'
       ],
-      mediaPlaceholder: 'CNN 工作原理 动画/示意'
+      mediaPlaceholder: 'CNN 工作原理 动画/示意',
+  image: '/images/placeholders/3-1.png'
     },
     {
       id: 'conv-pool',
@@ -161,7 +167,8 @@ export const day2Lesson = {
         '卷积提取边缘/纹理等局部特征',
         '池化用于下采样与噪声抑制'
       ],
-      mediaPlaceholder: '卷积与池化 动图'
+      mediaPlaceholder: '卷积与池化 动图',
+  image: '/images/placeholders/3-2.png'
     },
     {
       id: 'cnn-example',
@@ -175,7 +182,8 @@ export const day2Lesson = {
         '实践步骤清晰：数据->模型->训练->评估',
         '调参与数据增强通常比仅修改架构更有效'
       ],
-      mediaPlaceholder: 'Notebook / 代码片段 占位'
+      mediaPlaceholder: 'Notebook / 代码片段 占位',
+  image: '/images/placeholders/3-3.png'
     },
     {
       id: 'pooling-quiz',
@@ -203,7 +211,8 @@ export const day2Lesson = {
         '数据增强增加数据多样性',
         '归一化与标准化常用且重要'
       ],
-      mediaPlaceholder: '数据增强示例'
+      mediaPlaceholder: '数据增强示例',
+  image: '/images/placeholders/4-1.png'
     },
     {
       id: 'lr-earlystop',
@@ -217,7 +226,8 @@ export const day2Lesson = {
         '动态调整学习率通常比固定学习率效果更好',
         '早停法通过监控验证指标防止过拟合'
       ],
-      mediaPlaceholder: '学习率曲线 占位'
+      mediaPlaceholder: '学习率曲线 占位',
+  image: '/images/placeholders/4-2.png'
     },
     {
       id: 'model-eval',

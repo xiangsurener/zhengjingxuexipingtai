@@ -86,16 +86,17 @@ export const day1Lesson = {
         '神经网络擅长在复杂数据上发现模式',
         '不同算法各有适用场景，需要根据任务选择'
       ],
-      mediaPlaceholder: '三层蛋糕图示占位'
+      mediaPlaceholder: '三层蛋糕图示占位',
+  image: '/images/placeholders/1-2.png'
     },
     {
       id: 'structure',
       title: '1.3 神经网络的基本结构',
       type: 'lecture',
       transcript: [
-        '以28x28像素的手写数字"7"为例，神经网络这样"看懂"它：输入层把图片展开成784个数字，每个数字代表一个像素的灰度值；',
+        '以28x28像素的手写数字"3"为例，神经网络这样"看懂"它：输入层把图片展开成784个数字，每个数字代表一个像素的灰度值；',
         '隐藏层用128个"数学滤镜"提取特征（比如第一层找横线，第二层找斜线，第三层组合成数字轮廓）；',
-        '输出层给出0-9的概率（比如90%确定是"7"，5%可能是"1"）。光第一层就有784×128=10万个参数！相当于让AI记住10万本电话簿。',
+        '输出层给出0-9的概率（比如90%确定是"3"，5%可能是"1"）。光第一层就有784×128=10万个参数！相当于让AI记住10万本电话簿。',
         '但参数多也意味着风险——如果数据有偏差，AI可能学会"作弊"。比如早期猫狗分类器曾通过背景中的草地判断动物种类，而非真正识别动物特征。'
       ],
       keyPoints: [
@@ -103,7 +104,8 @@ export const day1Lesson = {
         '隐藏层通过多层变换提取高级特征',
         '输出层激活函数取决于任务类型（分类用Softmax，回归可不用）'
       ],
-      mediaPlaceholder: 'MNIST 手写数字演示占位'
+      mediaPlaceholder: 'MNIST 手写数字演示占位',
+  image: '/images/placeholders/1-3.png'
     },
     {
       id: 'ml-types',
@@ -121,7 +123,8 @@ export const day1Lesson = {
         '无监督学习适合探索性数据分析',
         '强化学习在决策类任务中表现突出'
       ],
-      mediaPlaceholder: '学习类型对比图占位'
+      mediaPlaceholder: '学习类型对比图占位',
+  image: '/images/placeholders/2-1.png'
     },
     {
       id: 'ml-workflow',
@@ -138,7 +141,8 @@ export const day1Lesson = {
         '80/10/10是常见的数据划分策略',
         '严格区分测试集，杜绝"提前看答案"'
       ],
-      mediaPlaceholder: 'X 光诊断流程占位'
+      mediaPlaceholder: 'X 光诊断流程占位',
+  image: '/images/placeholders/2-2.png'
     },
     {
       id: 'linear-regression',
@@ -154,7 +158,8 @@ export const day1Lesson = {
         '梯度下降负责寻找最优参数组合',
         '多元线性回归可以处理多个特征'
       ],
-      mediaPlaceholder: '房价坐标图占位'
+      mediaPlaceholder: '房价坐标图占位',
+  image: '/images/placeholders/2-3.png'
     },
     {
       id: 'linear-quiz',
@@ -184,7 +189,8 @@ export const day1Lesson = {
         '反向传播通过链式法则计算梯度',
         '随机梯度下降平衡训练效率与收敛稳定性'
       ],
-      mediaPlaceholder: '前向/反向传播流程图占位'
+      mediaPlaceholder: '前向/反向传播流程图占位',
+  image: '/images/placeholders/3-1.png'
     },
     {
       id: 'activations',
@@ -201,7 +207,8 @@ export const day1Lesson = {
         'ReLU及其变体缓解梯度消失问题',
         '不同激活函数适用于不同网络结构'
       ],
-      mediaPlaceholder: '激活函数曲线对比占位'
+      mediaPlaceholder: '激活函数曲线对比占位',
+  image: '/images/placeholders/3-2.png'
     },
     {
       id: 'loss-optimizer',
@@ -218,7 +225,8 @@ export const day1Lesson = {
         '优化器决定参数更新的策略和步长',
         'Adam结合了动量法和自适应学习率的优点'
       ],
-      mediaPlaceholder: '打靶例子 + 优化器对比占位'
+      mediaPlaceholder: '打靶例子 + 优化器对比占位',
+  image: '/images/placeholders/3-3.png'
     },
     {
       id: 'applications',
@@ -236,7 +244,8 @@ export const day1Lesson = {
         '不同领域需要针对性的网络结构和训练方法',
         '理解核心原理能帮助我们判断技术边界'
       ],
-      mediaPlaceholder: '多行业案例轮播占位'
+      mediaPlaceholder: '多行业案例轮播占位',
+  image: '/images/placeholders/4-1.png'
     },
     {
       id: 'coding',
@@ -253,7 +262,8 @@ export const day1Lesson = {
         '合理选择模型结构和超参数',
         '通过验证集监控模型性能防止过拟合'
       ],
-      mediaPlaceholder: 'Notebook 演示占位'
+      mediaPlaceholder: 'Notebook 演示占位',
+  image: '/images/placeholders/4-2.png'
     },
     {
       id: 'summary',
@@ -270,7 +280,8 @@ export const day1Lesson = {
         '实践是巩固理论知识的最佳途径',
         '为后续学习卷积神经网络打下基础'
       ],
-      mediaPlaceholder: '课程徽章展示占位'
+      mediaPlaceholder: '课程徽章展示占位',
+  image: '/images/placeholders/4-3.png'    
     }
   ]
 }

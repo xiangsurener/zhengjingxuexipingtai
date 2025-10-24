@@ -352,9 +352,17 @@ function SegmentContent({ segment, quizState, onSelectOption, answersLocked }) {
           </div>
         </div>
       )}
-      {!segment.video && segment.mediaPlaceholder && (
-        <div className="rounded-2xl bg-slate-100 border border-dashed border-slate-300 aspect-video flex items-center justify-center text-slate-500 text-sm">
-          {segment.mediaPlaceholder || '视频占位'}
+      {!segment.video && (segment.image || segment.mediaPlaceholder) && (
+        <div className="rounded-2xl overflow-hidden border border-slate-200 aspect-video flex items-center justify-center">
+          {segment.image ? (
+            <img
+              src={segment.image}
+              alt={segment.mediaPlaceholder || '课程配图'}
+              className="w-full h-full object-contain"
+            />
+          ) : (
+            <div className="text-slate-500 text-sm">{segment.mediaPlaceholder || '视频占位'}</div>
+          )}
         </div>
       )}
       {segment.hero && (
