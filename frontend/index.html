@@ -1,11 +1,25 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
+    <style>
+  .bottom-left-img {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 150px;
+    height: auto;
+    z-index: 999;
+  }
+  </style>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI 学习平台</title>
   </head>
   <body>
+     <video class="bottom-left-img" autoplay loop muted playsinline>
+  <source src="/videos/teacher.mp4" type="video/mp4">
+  您的浏览器不支持视频播放
+   </video>
     <div id="root"></div>
     <script type="module" src="/src/index.jsx"></script>
   </body>
