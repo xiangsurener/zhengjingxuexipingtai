@@ -467,7 +467,14 @@ class AITeacherGame:
 teacher = AITeacherGame()
 
 def create_app():
-    app = Flask(__name__, static_folder=None)
+   import os
+# ... 其他导入代码
+
+def create_app():
+    # 拼接 frontend/public 目录的路径，因为 backend 和 frontend 是同级目录
+    static_folder_path = os.path.join(os.path.pardir, 'frontend', 'public')
+    app = Flask(__name__, static_url_path='', static_folder=static_folder_path)
+    # 后续的 CORS、配置等代码...
     # 允许所有来源访问 /api/*（开发阶段）
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config["SECRET_KEY"] = config.SECRET_KEY
