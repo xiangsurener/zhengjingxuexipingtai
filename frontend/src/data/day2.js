@@ -46,7 +46,7 @@ export const day2Lesson = {
         '深度学习在图像、语音、NLP 等领域表现卓越'
       ],
       mediaPlaceholder: '深度学习应用示例图',
-  image: '/images/placeholders/1-1.png'
+  image: '/images/placeholders/5-1.png'
     },
     {
       id: 'advantages',
@@ -63,7 +63,7 @@ export const day2Lesson = {
         '适合非结构化数据'
       ],
       mediaPlaceholder: '传统 ML vs 深度学习 对比图',
-  image: '/images/placeholders/1-2.png'
+  image: '/images/placeholders/5-2.png'
     },
     {
       id: 'overfitting-quiz',
@@ -92,7 +92,7 @@ export const day2Lesson = {
         '设计需兼顾性能与计算成本'
       ],
       mediaPlaceholder: '网络结构示意',
-  image: '/images/placeholders/2-1.png'
+  image: '/images/placeholders/5-3.png'
     },
     {
       id: 'init-opt',
@@ -108,7 +108,7 @@ export const day2Lesson = {
         'Adam 等自适应优化器常用'
       ],
       mediaPlaceholder: '初始化与优化对比图',
-  image: '/images/placeholders/2-2.png'
+  image: '/images/placeholders/5-4.png'
     },
     {
       id: 'xavier-quiz',
@@ -138,7 +138,7 @@ export const day2Lesson = {
         'BatchNorm 有助于稳定训练，配合其他方法使用效果更佳'
       ],
       mediaPlaceholder: '过拟合示例图',
-  image: '/images/placeholders/2-3.png'
+  image: '/images/placeholders/5-5.png'
     },
     {
       id: 'cnn-intro',
@@ -153,7 +153,7 @@ export const day2Lesson = {
         '池化层降低维度、减少计算'
       ],
       mediaPlaceholder: 'CNN 工作原理 动画/示意',
-  image: '/images/placeholders/3-1.png'
+  image: '/images/placeholders/5-67.png'
     },
     {
       id: 'conv-pool',
@@ -168,7 +168,7 @@ export const day2Lesson = {
         '池化用于下采样与噪声抑制'
       ],
       mediaPlaceholder: '卷积与池化 动图',
-  image: '/images/placeholders/3-2.png'
+  image: '/images/placeholders/5-67.png'
     },
     {
       id: 'cnn-example',
@@ -183,7 +183,7 @@ export const day2Lesson = {
         '调参与数据增强通常比仅修改架构更有效'
       ],
       mediaPlaceholder: 'Notebook / 代码片段 占位',
-  image: '/images/placeholders/3-3.png'
+  image: '/images/placeholders/5-8.png'
     },
     {
       id: 'pooling-quiz',
@@ -212,7 +212,7 @@ export const day2Lesson = {
         '归一化与标准化常用且重要'
       ],
       mediaPlaceholder: '数据增强示例',
-  image: '/images/placeholders/4-1.png'
+  image: '/images/placeholders/5-9.png'
     },
     {
       id: 'lr-earlystop',
@@ -227,7 +227,7 @@ export const day2Lesson = {
         '早停法通过监控验证指标防止过拟合'
       ],
       mediaPlaceholder: '学习率曲线 占位',
-  image: '/images/placeholders/4-2.png'
+  image: '/images/placeholders/5-10.png'
     },
     {
       id: 'model-eval',
@@ -241,7 +241,8 @@ export const day2Lesson = {
         '多个指标综合评估模型性能',
         '交叉验证提高结果可信度'
       ],
-      mediaPlaceholder: '评估指标 对比图'
+      mediaPlaceholder: '评估指标 对比图',
+  image: '/images/placeholders/5-11.png'
     },
     {
       id: 'grad-quiz',
@@ -269,7 +270,8 @@ export const day2Lesson = {
         '实践是掌握深度学习的关键',
         '记录实验配置与结果，便于复现实验'
       ],
-      mediaPlaceholder: 'Notebook 演示 占位'
+      mediaPlaceholder: 'Notebook 演示 占位',
+  image: '/images/placeholders/4-2.png'
     },
     {
       id: 'summary',
@@ -283,7 +285,8 @@ export const day2Lesson = {
         '设计、初始化与优化对训练成功至关重要',
         '数据增强与评估指标是提升泛化的核心工具'
       ],
-      mediaPlaceholder: '课程徽章 占位'
+      mediaPlaceholder: '课程徽章 占位',
+  image: '/images/placeholders/4-3.png'
     }
   ]
 };
